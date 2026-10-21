@@ -1,0 +1,5 @@
+node_modules/
+android/
+*.jks
+Signaturschluessel*.txt
+.DS_Store

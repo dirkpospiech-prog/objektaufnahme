@@ -1,0 +1,74 @@
+# Baut bei jeder Änderung automatisch die Android-App (APK) und stellt sie unter „Releases“ bereit.
+# Download-Link für Nutzer: https://github.com/<KONTO>/<REPO>/releases/latest/download/Objektaufnahme.apk
+name: Android-App bauen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Abhängigkeiten installieren
+        run: npm install --no-audit --no-fund
+
+      - name: Android-Projekt erzeugen
+        run: |
+          npx cap add android
+          npx capacitor-assets generate --android
+          sed -i "s/versionCode [0-9]*/versionCode $((GITHUB_RUN_NUMBER + 100))/; s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" android/app/build.gradle
+          npx cap sync android
+
+      - name: APK bauen
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          if [ -n "$KEYSTORE_B64" ]; then ./gradlew assembleRelease --no-daemon; else ./gradlew assembleDebug --no-daemon; fi
+
+      - name: APK signieren
+        run: |
+          mkdir -p out
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > release.jks
+            BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+            "$BT/zipalign" -f -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk out/aligned.apk
+            "$BT/apksigner" sign --ks release.jks --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias "$KEY_ALIAS" --key-pass env:KEYSTORE_PASSWORD --out out/Objektaufnahme.apk out/aligned.apk
+            "$BT/apksigner" verify out/Objektaufnahme.apk
+            rm -f release.jks out/aligned.apk
+          else
+            echo "::warning::Kein Signaturschlüssel hinterlegt – es wird eine Test-APK gebaut. Updates lassen sich dann nicht über eine ältere Version installieren."
+            cp android/app/build/outputs/apk/debug/app-debug.apk out/Objektaufnahme.apk
+          fi
+
+      - name: Als Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Objektaufnahme 1.0.${{ github.run_number }}
+          body: |
+            Automatisch gebaut aus dem Stand vom ${{ github.event.head_commit.timestamp || 'manuellen Start' }}.
+            Installation: Objektaufnahme.apk auf dem Android-Handy öffnen und „Installieren“ tippen.
+          files: out/Objektaufnahme.apk
+          make_latest: true

@@ -1,0 +1,17 @@
+{
+  "name": "objektaufnahme-pospiech",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Objektaufnahme-App der Immobilien Pospiech GbR (Web-App + Android)",
+  "scripts": {
+    "android:prepare": "cap add android && capacitor-assets generate --android && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.5.2"
+  }
+}

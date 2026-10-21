@@ -1,0 +1,14 @@
+{
+  "appId": "de.immobilienneuruppin.objektaufnahme",
+  "appName": "Objektaufnahme",
+  "webDir": "app",
+  "android": {
+    "backgroundColor": "#2A2F35",
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
