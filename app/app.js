@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.6.1";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -14,7 +14,7 @@ async function checkForUpdate() {
     const r = await fetch("https://api.github.com/repos/dirkpospiech-prog/objektaufnahme/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
     if (!r.ok) return; const j = await r.json();
     const build = Number(String(j.tag_name || "").split(".").pop());
-    if (build > APP_BUILD) { updateInfo = { build, name: j.name || j.tag_name }; if (view === "home") renderHome(false); }
+    if (build > APP_BUILD) { const neu = !updateInfo; updateInfo = { build, name: j.name || j.tag_name }; if (view === "home") renderHome(false); else if (neu) toast("Neue App-Version verfügbar – Hinweis auf der Startseite"); }
   } catch (e) { /* kein Netz: beim nächsten Start */ }
 }
 const LS = {
@@ -682,7 +682,7 @@ function adminAccess(objs, users) {
   DB = await openDB(); if (!DB) STORAGE_OK = false;
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   window.addEventListener("online", () => { if (view === "home") renderHome(false); else if (view === "obj") checkServerVersion(); });
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState !== "visible" || !session) return; if (view === "home") refreshRemote(true); else if (view === "obj") checkServerVersion(); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); if (document.visibilityState !== "visible" || !session) return; if (view === "home") refreshRemote(true); else if (view === "obj") checkServerVersion(); });
   window.addEventListener("offline", () => { if (view === "home") renderHome(false); });
   try { history.replaceState({ v: "root" }, ""); } catch (e) {}
   if (session && session.token) renderHome(false); else renderAuth();
