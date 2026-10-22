@@ -242,7 +242,7 @@ const DOC_WHEN = [null, null, null, bebaut, bebaut, bebaut, bebaut, null, bebaut
 
 /* Übersicht: Abschnitte in der Reihenfolge, in der sie meist bearbeitet werden ("F" = Fotos) */
 const PHASES = [
-  { t: "Vorbereitung im Büro", s: ["s1", "s2", "s3", "s4", "s17"] },
+  { t: "Vorbereitung im Büro", s: ["s1", "s2", "s3", "s4", "s17", "D"] },
   { t: "Ortstermin", s: ["s16", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12", "s13", "F"] },
   { t: "Nachbereitung", s: ["s14", "s15", "s18"] }
 ];

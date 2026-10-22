@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.6.1";
+const APP_VERSION = "1.7.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -46,14 +46,15 @@ async function api(action, payload = {}) {
 }
 
 /* ---------------- Speicher auf dem Gerät ---------------- */
-let DB = null; const MEM = { objects: new Map(), photos: new Map() }; let STORAGE_OK = true;
+let DB = null; const MEM = { objects: new Map(), photos: new Map(), files: new Map() }; let STORAGE_OK = true;
 function openDB() {
   return new Promise(res => {
     try {
-      const r = indexedDB.open("objektaufnahme", 2);
+      const r = indexedDB.open("objektaufnahme", 3);
       r.onupgradeneeded = () => { const d = r.result;
         if (!d.objectStoreNames.contains("objects")) d.createObjectStore("objects", { keyPath: "id" });
-        if (!d.objectStoreNames.contains("photos")) d.createObjectStore("photos", { keyPath: "id" }).createIndex("obj", "obj"); };
+        if (!d.objectStoreNames.contains("photos")) d.createObjectStore("photos", { keyPath: "id" }).createIndex("obj", "obj");
+        if (!d.objectStoreNames.contains("files")) d.createObjectStore("files", { keyPath: "id" }).createIndex("obj", "obj"); };
       r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onblocked = () => res(null);
     } catch (e) { res(null); }
   });
@@ -69,12 +70,13 @@ const store = {
   async get(n, id) { if (!DB) return MEM[n].get(id) || null; return (await tx(n, "readonly", s => s.get(id))) || null; },
   async put(n, v) { if (!DB) { MEM[n].set(v.id, v); return; } await tx(n, "readwrite", s => s.put(v)); },
   async del(n, id) { if (!DB) { MEM[n].delete(id); return; } await tx(n, "readwrite", s => s.delete(id)); },
+  async filesOf(obj) { if (!DB) return [...MEM.files.values()].filter(p => p.obj === obj); return (await tx("files", "readonly", s => s.index("obj").getAll(obj))) || []; },
   async photosOf(obj) { if (!DB) return [...MEM.photos.values()].filter(p => p.obj === obj); return (await tx("photos", "readonly", s => s.index("obj").getAll(obj))) || []; }
 };
 const cleanPhoto = p => { const { _t, url, ...r } = p; return r; };
 
 /* ---------------- Zustand & Hilfen ---------------- */
-let objects = [], remote = [], cur = null, curPhotos = [], view = "auth", secIdx = 0, photoCat = PHOTO_CATS[0], busy = false;
+let objects = [], remote = [], cur = null, curPhotos = [], curFiles = [], scanPages = [], docType = "", view = "auth", secIdx = 0, photoCat = PHOTO_CATS[0], busy = false;
 const urls = new Map();
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -86,6 +88,7 @@ const ICON = {
   back: '<svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   sync: '<svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2M3 12a9 9 0 0 1 15.5-6.2"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>',
+  doc: '<svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></svg>',
   cam: '<svg class="i" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
   more: '<svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',
   user: '<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
@@ -119,6 +122,7 @@ function applyCascade(d) {
 const secProgress = (s, d) => { const fs = s.f.filter(f => countable(f) && vis(f, d)); return fs.length ? Math.round(100 * fs.filter(f => filled(f, d)).length / fs.length) : 100; };
 function totalProgress(o) { const d = o.data || {}; let a = 0, b = 0; SECTIONS.filter(s => vis(s, d)).forEach(s => s.f.filter(f => countable(f) && vis(f, d)).forEach(f => { b++; if (filled(f, d)) a++; })); return b ? Math.round(100 * a / b) : 0; }
 function syncState(o) {
+  if (o.goneOnServer) return ["warn", "Auf dem Server gelöscht – Abgleichen legt es neu an"];
   if (o.serverNewer && o.serverNewer > (o.version || 0)) return ["warn", "Neuere Fassung auf dem Server – bitte abgleichen"];
   if (!o.version) return ["new", "Noch nicht auf dem Server"];
   if (o.dirty || o.pendingPhotos) return ["warn", "Änderungen nicht abgeglichen"];
@@ -235,10 +239,21 @@ async function refreshRemote(silent) {
       if (cur && cur.id === ro.id) continue;      // gerade geöffnet: dort prüfen
       try { await loadServerObject(ro.id); loaded++; } catch (e) { /* einzelnes Objekt später erneut */ }
     }
+    const ids = new Set(remote.map(x => x.id));
+    for (const lo of await store.all("objects")) {
+      if (!lo.version || ids.has(lo.id)) continue;            // nie hochgeladen oder noch vorhanden
+      if (lo.dirty || lo.pendingPhotos) { if (!lo.goneOnServer) { lo.goneOnServer = true; await store.put("objects", lo); } continue; }
+      await removeLocal(lo.id);                               // gelöscht oder kein Zugriff mehr
+    }
     if (view === "home") renderHome(false);
     if (!silent) toast(loaded ? loaded + " Aufnahme(n) aktualisiert" : "Alles auf dem neuesten Stand");
   } catch (e) { if (!silent && $("#homeMsg")) $("#homeMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
   finally { refreshRemote.busy = false; }
+}
+async function removeLocal(id) {
+  for (const p of await store.photosOf(id)) await store.del("photos", p.id);
+  for (const f of await store.filesOf(id)) await store.del("files", f.id);
+  await store.del("objects", id);
 }
 const removedIds = () => { try { return JSON.parse(LS.get("removedIds") || "[]"); } catch (e) { return []; } };
 /* Beim Öffnen eines Objekts: gibt es auf dem Server eine neuere Fassung? */
@@ -267,13 +282,17 @@ async function loadServerObject(id) {
   const local = await store.get("objects", id);
   const localPh = local ? await store.photosOf(id) : [];
   for (const p of s.photos || []) { const lp = localPh.find(x => x.id === p.id); await store.put("photos", { ...p, obj: id, blob: lp ? lp.blob : null, thumb: lp ? lp.thumb : null }); }
+  const localFiles = local ? await store.filesOf(id) : [];
+  for (const f of s.files || []) { const lf = localFiles.find(x => x.id === f.id); await store.put("files", { ...f, obj: id, blob: lf ? lf.blob : null }); }
+  for (const lf of localFiles) if (lf.fileId && !(s.files || []).some(f => f.id === lf.id)) await store.del("files", lf.id);
   const o = { id, created: s.created, updated: s.updated, data: s.data || {}, title: s.title, version: s.version, folderUrl: r.object.folderUrl, creator: s.creator, dirty: false, serverNewer: 0, lastSync: new Date().toISOString() };
-  const all = await store.photosOf(id); o.photoCount = all.length; o.pendingPhotos = all.some(p => !p.fileId);
+  const all = await store.photosOf(id), allF = await store.filesOf(id); o.photoCount = all.length; o.pendingPhotos = all.some(p => !p.fileId) || allF.some(f => !f.fileId);
   await store.put("objects", o);
 }
 async function openObject(id, sec = "O", refreshOnly = false) {
   cur = await store.get("objects", id); if (!cur) return renderHome(false);
   curPhotos = (await store.photosOf(id)).sort((a, b) => (a.taken || "").localeCompare(b.taken || ""));
+  curFiles = (await store.filesOf(id)).sort((a, b) => (a.added || "").localeCompare(b.added || ""));
   view = "obj"; secIdx = sec;
   if (refreshOnly) return rerenderKeepScroll();
   renderObj(); window.scrollTo(0, 0); go("obj");
@@ -284,7 +303,8 @@ async function openObject(id, sec = "O", refreshOnly = false) {
 function renderObj() {
   const d = cur.data; const [c, t] = syncState(cur);
   const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + SECTIONS.map((s, i) => !vis(s, d) ? "" : `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
-    + `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`;
+    + `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`
+    + `<button data-sec="D" aria-current="${secIdx === "D"}">${ICON.doc}Unterlagen<span class="p">${curFiles.length}</span></button>`;
   $("#app").innerHTML = `
   <header class="top"><div class="wrap">
     <button class="btn ghost" id="home" aria-label="Zur Übersicht">${ICON.back}</button>
@@ -301,6 +321,7 @@ function renderSection() {
   const m = $("#main");
   if (secIdx === "F") { m.innerHTML = photosHTML(); bindPhotos(); return; }
   if (secIdx === "O") { m.innerHTML = overviewHTML(); return; }
+  if (secIdx === "D") { m.innerHTML = docsHTML(); bindDocs(); return; }
   const d = cur.data, list = visSections(d);
   if (!list.includes(secIdx)) secIdx = list.find(i => i > secIdx) ?? list[list.length - 1];
   const s = SECTIONS[secIdx], pos = list.indexOf(secIdx), prev = list[pos - 1], next = list[pos + 1];
@@ -314,6 +335,7 @@ function renderSection() {
 function overviewHTML() {
   const d = cur.data, [c, t] = syncState(cur), pend = curPhotos.filter(p => !p.fileId).length;
   const row = id => {
+    if (id === "D") { const pf = curFiles.filter(f => !f.fileId).length; return `<button class="ov-row" data-sec="D"><span class="ov-n">${ICON.doc}</span><span class="ov-t">Unterlagen (Scans, PDFs)</span><span class="ov-p">${curFiles.length}${pf ? ` · ${pf} neu` : ""}</span></button>`; }
     if (id === "F") return `<button class="ov-row" data-sec="F"><span class="ov-n">${ICON.cam}</span><span class="ov-t">Fotos</span><span class="ov-p">${curPhotos.length}${pend ? ` · ${pend} neu` : ""}</span></button>`;
     const i = SECTIONS.findIndex(x => x.id === id), s = SECTIONS[i]; if (!vis(s, d)) return "";
     const p = secProgress(s, d);
@@ -354,7 +376,8 @@ function fieldHTML(f, d) {
         <div class="fld"><span>Umfang</span>${pills("mod:" + ri, ["vollständig", "teilweise"], r.u, false)}</div>
         <label class="fld full"><span>Details / Kosten</span><input type="text" id="f_mod_${ri}_d" data-mod="${ri}" data-c="d" value="${esc(r.d)}"></label></div>`; }).join("")}</div>`; }
     case "docs": { const dv = v || {};
-      return visRows(f, d).map(ri => `<div class="doc"><div>${esc(f.rows[ri])}</div>${pills("doc:" + ri, f.o, (dv[ri] || {}).s, false)}</div>`).join(""); }
+      const cnt = ri => curFiles.filter(x => x.docRow === ri).length;
+      return `<div class="doc" style="border:0"><button type="button" class="btn" data-sec="D">${ICON.doc}Unterlagen scannen oder als Datei anhängen</button></div>` + visRows(f, d).map(ri => `<div class="doc"><div>${esc(f.rows[ri])}${cnt(ri) ? ` <span class="chip ok">${cnt(ri)} Datei${cnt(ri) > 1 ? "en" : ""}</span>` : ""}</div>${pills("doc:" + ri, f.o, (dv[ri] || {}).s, false)}</div>`).join(""); }
   }
   return "";
 }
@@ -394,6 +417,11 @@ document.addEventListener("click", async e => {
   if (b.id === "refresh") return refreshRemote(false);
   if (b.id === "getUpdate") { window.location.href = APK_URL; return; }
   if (b.id === "camBtn") return takeNativePhoto();
+  if (b.id === "scanBtn" || b.id === "scanMore") return scanPage();
+  if (b.id === "scanDone") return finishScan();
+  if (b.id === "scanCancel") { scanPages = []; return renderSection(); }
+  if (ds.fview) return viewDoc(ds.fview);
+  if (ds.fdel) return confirmSheet("Unterlage löschen?", ds.onServer === "1" ? "Die Unterlage wird aus der Aufnahme entfernt (wirksam nach dem nächsten Abgleich). Die Datei bleibt zur Sicherheit im Drive-Ordner „Unterlagen“." : "Die Datei ist noch nicht auf dem Server und geht damit endgültig verloren.", "Löschen", () => deleteDoc(ds.fdel));
   if (b.id === "toAdmin") return renderAdmin("users", true);
   if (b.id === "toAccount") return accountSheet();
   if (ds.open) return openObject(ds.open);
@@ -403,7 +431,7 @@ document.addEventListener("click", async e => {
   if (b.id === "home") { clearTimeout(saveT); await store.put("objects", cur); return history.back(); }
   if (b.id === "sync" || b.id === "sync2") return syncNow();
   if (b.id === "menu") return objMenu();
-  if (ds.sec !== undefined || ds.go !== undefined) { const v = ds.sec ?? ds.go; secIdx = v === "F" || v === "O" ? v : +v; renderObj(); window.scrollTo(0, 0); return; }
+  if (ds.sec !== undefined || ds.go !== undefined) { const v = ds.sec ?? ds.go; secIdx = ["F", "O", "D"].includes(v) ? v : +v; renderObj(); window.scrollTo(0, 0); return; }
   if (ds.k && ds.v !== undefined) {
     let val;
     if (ds.k.startsWith("mod:") || ds.k.startsWith("doc:")) {
@@ -430,6 +458,98 @@ document.addEventListener("click", async e => {
 });
 
 function rerenderKeepScroll() { const y = window.scrollY; renderObj(); window.scrollTo(0, y); }
+
+/* ---------------- Unterlagen (Scans, PDFs, Bilder) ---------------- */
+const docRows = () => { const f = SECTIONS.flatMap(s => s.f).find(x => x.t === "docs"); return visRows(f, cur.data).map(i => ({ i, l: f.rows[i] })); };
+const docLabel = ri => { const f = SECTIONS.flatMap(s => s.f).find(x => x.t === "docs"); return ri >= 0 ? f.rows[ri] : "Sonstige Unterlage"; };
+const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+function docsHTML() {
+  const rows = docRows(); if (docType === "" && rows.length) docType = String(rows[0].i);
+  const pend = curFiles.filter(f => !f.fileId).length;
+  return `<section class="sec"><div class="sec-head"><span class="num">U</span><h2>Unterlagen</h2></div>
+    <div class="hint" style="font-style:normal;color:var(--muted)">Gescannte Seiten werden zu einer PDF zusammengefasst. Nach dem Abgleich liegen alle Dateien im Drive-Ordner des Objekts unter „Unterlagen“.</div>
+    <label class="fld"><span>Art der Unterlage</span><select id="docType">${rows.map(r => `<option value="${r.i}"${String(r.i) === docType ? " selected" : ""}>${esc(r.l)}</option>`).join("")}<option value="-1"${docType === "-1" ? " selected" : ""}>Sonstige Unterlage</option></select></label>
+    ${scanPages.length ? `<div class="scanbox"><b>Scan: ${scanPages.length} Seite${scanPages.length > 1 ? "n" : ""}</b>
+        <div class="scanthumbs">${scanPages.map((b, i) => `<img src="${URL.createObjectURL(b)}" alt="Seite ${i + 1}">`).join("")}</div>
+        <div class="actions" style="padding:0">${nativeCamera() ? `<button type="button" class="btn" id="scanMore">${ICON.cam}Weitere Seite</button>` : `<label class="btn addph">${ICON.cam}Weitere Seite<input type="file" accept="image/*" capture="environment" id="scanIn" aria-label="Weitere Seite fotografieren"></label>`}<button type="button" class="btn primary" id="scanDone">Fertig – als PDF speichern</button></div>
+        <button type="button" class="btn link" id="scanCancel" style="color:var(--bad)">Scan verwerfen</button></div>`
+      : `<div class="actions stack" style="padding:0">
+        ${nativeCamera() ? `<button type="button" class="btn primary" id="scanBtn">${ICON.cam}Dokument scannen</button>` : `<label class="btn primary addph">${ICON.cam}Dokument scannen<input type="file" accept="image/*" capture="environment" id="scanIn" aria-label="Seite fotografieren"></label>`}
+        <label class="btn addph">${ICON.plus}Datei wählen (PDF, Bild)<input type="file" accept="application/pdf,image/jpeg,image/png" multiple id="docIn" aria-label="Datei wählen"></label></div>`}
+    <div style="font-size:14px;color:var(--muted)">${curFiles.length} Datei(en) · ${pend ? `<b style="color:var(--warn)">${pend} noch nicht auf dem Server</b>` : "alle auf dem Server"}</div>
+    <div class="filelist">${curFiles.map(f => `<div class="filerow"><span class="ficon">${f.mime === "application/pdf" ? "PDF" : "BILD"}</span>
+        <div class="finfo"><b>${esc(docLabel(f.docRow))}</b><span>${esc(f.name || "")}${f.size ? " · " + fmtSize(f.size) : ""}${f.pages ? " · " + f.pages + " S." : ""}</span><span>${f.fileId ? "✓ auf dem Server" : "nicht abgeglichen"}</span></div>
+        <div class="factions">${f.blob ? `<button type="button" class="btn small" data-fview="${f.id}">Ansehen</button>` : ""}<button type="button" class="btn small danger" data-fdel="${f.id}" data-on-server="${f.fileId ? 1 : 0}">Löschen</button></div></div>`).join("") || `<div class="empty">Noch keine Unterlagen. Art wählen, dann scannen oder eine Datei wählen.</div>`}</div>
+  </section>`;
+}
+function bindDocs() {
+  const t = $("#docType"); if (t) t.onchange = () => { docType = t.value; };
+  const si = $("#scanIn"); if (si) si.onchange = async ev => { const f = ev.target.files[0]; if (f) { scanPages.push(await compressScan(f)); renderSection(); } };
+  const di = $("#docIn"); if (di) di.onchange = ev => addDocFiles(ev.target.files);
+}
+async function compressScan(file) { return await shrink(file, 2000, 0.72); }
+async function scanPage() {
+  if (!nativeCamera()) { const i = $("#scanIn"); if (i) i.click(); else { renderSection(); setTimeout(() => { const j = $("#scanIn"); if (j) j.click(); }, 50); } return; }
+  try {
+    const ph = await nativeCamera().getPhoto({ quality: 90, source: "CAMERA", resultType: "uri", saveToGallery: false, correctOrientation: true, width: 2000 });
+    const blob = await fetch(ph.webPath).then(r => r.blob());
+    scanPages.push(await compressScan(blob)); renderSection();
+  } catch (e) { const m = String((e && e.message) || e); if (!/cancel/i.test(m)) toast("Kamera konnte nicht geöffnet werden: " + m); }
+}
+let pdfLib = null;
+function loadPdfLib() {
+  if (pdfLib) return pdfLib;
+  pdfLib = new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "vendor/jspdf.umd.min.js"; sc.onload = () => res(window.jspdf.jsPDF); sc.onerror = () => { pdfLib = null; rej(new Error("PDF-Modul nicht geladen")); }; document.head.appendChild(sc); });
+  return pdfLib;
+}
+async function finishScan() {
+  if (!scanPages.length) return;
+  toast("PDF wird erstellt …");
+  try {
+    const jsPDF = await loadPdfLib();
+    let pdf = null;
+    for (const b of scanPages) {
+      const bmp = await createImageBitmap(b); const land = bmp.width > bmp.height; const w = bmp.width, h = bmp.height; if (bmp.close) bmp.close();
+      const pw = land ? 297 : 210, phh = land ? 210 : 297, m = 6, sc = Math.min((pw - 2 * m) / w, (phh - 2 * m) / h);
+      if (!pdf) pdf = new jsPDF({ orientation: land ? "landscape" : "portrait", unit: "mm", format: "a4", compress: true });
+      else pdf.addPage("a4", land ? "landscape" : "portrait");
+      const data = new Uint8Array(await b.arrayBuffer());
+      pdf.addImage(data, "JPEG", (pw - w * sc) / 2, (phh - h * sc) / 2, w * sc, h * sc, undefined, "FAST");
+    }
+    const blob = pdf.output("blob");
+    await storeDoc(blob, "application/pdf", "pdf", scanPages.length);
+    scanPages = []; renderObj(); toast("Scan als PDF gespeichert");
+  } catch (e) { toast("PDF konnte nicht erstellt werden: " + e.message); }
+}
+async function addDocFiles(files) {
+  for (const f of files || []) {
+    if (f.size > 25 * 1024 * 1024) { toast("„" + f.name + "“ ist zu groß (max. 25 MB)."); continue; }
+    const mime = f.type === "application/pdf" ? "application/pdf" : f.type === "image/png" ? "image/png" : "image/jpeg";
+    const blob = mime === "application/pdf" ? f : await shrink(f, 2400, 0.8);
+    await storeDoc(blob, mime === "application/pdf" ? mime : "image/jpeg", mime === "application/pdf" ? "pdf" : "jpg", 0);
+  }
+  renderObj();
+}
+async function storeDoc(blob, mime, ext, pages) {
+  const ri = Number(docType === "" ? -1 : docType);
+  const base = safeName(docLabel(ri).replace(/\s*\(.*?\)/g, "")).replace(/[ ,/.]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 50);
+  const f = { id: uid(), obj: cur.id, docRow: ri, mime, blob, size: blob.size, pages, added: new Date().toISOString(), by: session.user.email };
+  f.name = `${base}_${f.id.slice(-6)}.${ext}`;
+  await store.put("files", f); curFiles.push(f);
+  if (ri >= 0) { const m = cur.data.docs || {}; m[ri] = { ...(m[ri] || {}), s: "liegt vor" }; cur.data.docs = m; }
+  cur.pendingPhotos = true; touch();
+}
+async function deleteDoc(id) {
+  await store.del("files", id); curFiles = curFiles.filter(f => f.id !== id); cur.dirty = true; cur.pendingPhotos = curPhotos.some(p => !p.fileId) || curFiles.some(f => !f.fileId);
+  await store.put("objects", cur); renderObj();
+}
+function viewDoc(id) {
+  const f = curFiles.find(x => x.id === id); if (!f || !f.blob) return;
+  const u = URL.createObjectURL(f.blob);
+  if (f.mime !== "application/pdf") return sheet(`<h2>${esc(docLabel(f.docRow))}</h2><img src="${u}" alt="" style="max-height:65vh;width:auto;max-width:100%"><button class="btn" data-close>Schließen</button>`);
+  if (IS_APP) return sheet(`<h2>${esc(docLabel(f.docRow))}</h2><p style="margin:0">PDF mit ${f.pages || "?"} Seite(n), ${fmtSize(f.size)}. PDFs lassen sich in der App nicht direkt anzeigen – nach dem Abgleich im Drive-Ordner „Unterlagen“ ansehen.</p><button class="btn" data-close>Schließen</button>`);
+  window.open(u, "_blank");
+}
 
 /* ---------------- Fotos ---------------- */
 function photosHTML() {
@@ -510,7 +630,7 @@ async function addPhotos(files) {
 async function deletePhoto(id) {
   await store.del("photos", id); curPhotos = curPhotos.filter(p => p.id !== id);
   const u = urls.get(id); if (u) { URL.revokeObjectURL(u); urls.delete(id); }
-  cur.photoCount = curPhotos.length; cur.pendingPhotos = curPhotos.some(p => !p.fileId); cur.dirty = true;
+  cur.photoCount = curPhotos.length; cur.pendingPhotos = curPhotos.some(p => !p.fileId) || curFiles.some(f => !f.fileId); cur.dirty = true;
   await store.put("objects", cur); renderObj();
 }
 async function showPhoto(id) {
@@ -535,13 +655,16 @@ function objMenu() {
   sheet(`<h2>${esc(objTitle(cur))}</h2>
     ${cur.folderUrl && isAdmin() ? `<a class="btn" href="${esc(cur.folderUrl)}" target="_blank" rel="noopener">Ordner in Google Drive öffnen</a>` : ""}
     ${cur.version ? `<button class="btn" id="reload">Neueste Fassung vom Server laden</button>` : ""}
-    <button class="btn danger" id="delObj">Von diesem Gerät entfernen</button><button class="btn" data-close>Schließen</button>`);
+    <button class="btn" id="delObj">Nur von diesem Gerät entfernen</button>
+    ${isAdmin() && cur.version ? `<button class="btn danger" id="delAll">Objekt löschen (für alle)</button>` : ""}
+    <button class="btn" data-close>Schließen</button>`);
+  const da = $("#delAll"); if (da) da.onclick = () => adminDelete(cur.id, objTitle(cur));
   const rl = $("#reload"); if (rl) rl.onclick = () => {
     const doIt = async () => { try { await loadServerObject(cur.id); closeSheet(); openObject(cur.id, secIdx); toast("Neueste Fassung geladen"); } catch (e) { toast(e.message); } };
     if (cur.dirty) confirmSheet("Lokale Änderungen verwerfen?", "Auf diesem Gerät gibt es Änderungen, die noch nicht auf dem Server sind. Sie gehen verloren.", "Laden", doIt); else doIt();
   };
   $("#delObj").onclick = () => confirmSheet("Aufnahme entfernen?", (cur.dirty || cur.pendingPhotos) ? "Achtung: Änderungen oder Fotos sind noch nicht auf dem Server und gehen verloren." : "Die Aufnahme wird nur von diesem Gerät entfernt. Auf dem Server bleibt alles erhalten.", "Entfernen", async () => {
-    for (const p of curPhotos) await store.del("photos", p.id); await store.del("objects", cur.id);
+    await removeLocal(cur.id);
     LS.set("removedIds", JSON.stringify([...new Set([...removedIds(), cur.id])])); cur = null; renderHome(false);
   });
 }
@@ -586,16 +709,18 @@ function protocol() {
     }
     if (rows.length) out.push({ title: s.n + ". " + s.t, rows });
   }
+  if (curFiles.length) out.push({ title: "Unterlagen (Dateien im Ordner „Unterlagen“)", rows: curFiles.map(f => [docLabel(f.docRow), (f.name || "") + (f.pages ? " · " + f.pages + " Seite(n)" : "")]) });
   if (curPhotos.length) out.push({ title: "Fotodokumentation", rows: curPhotos.map(p => [p.name || p.cat, [p.cat, p.caption].filter(Boolean).join(" – ")]) });
   return out;
 }
 const safeName = s => String(s || "").replace(/[\\/:*?"<>|#\n\r]+/g, " ").replace(/\s+/g, " ").trim();
 function photoName(p) { const i = PHOTO_CATS.indexOf(p.cat) + 1; return `${String(i).padStart(2, "0")}_${safeName(p.cat).replace(/ \/ /g, "-").replace(/ /g, "_")}_${p.id.slice(-6)}.jpg`; }
+const fileMeta = () => curFiles.filter(f => f.fileId).map(f => ({ id: f.id, docRow: f.docRow, mime: f.mime, name: f.name, size: f.size, pages: f.pages || 0, added: f.added, by: f.by || "", fileId: f.fileId }));
 const photoMeta = () => curPhotos.filter(p => p.fileId).map(p => ({ id: p.id, cat: p.cat, caption: p.caption || "", taken: p.taken, by: p.by || "", fileId: p.fileId, name: p.name }));
 function slog(m, c = "") { const l = $("#slog"); if (l) l.insertAdjacentHTML("beforeend", `<div class="${c}">${esc(m)}</div>`); }
 function bar(p) { const b = $("#sbar"); if (b) b.style.width = p + "%"; }
 async function saveRemote(force) {
-  const r = await api("saveObject", { object: { id: cur.id, title: objTitle(cur), data: cur.data, photos: photoMeta(), created: cur.created }, baseVersion: cur.version || 0, force: !!force, protocol: protocol() });
+  const r = await api("saveObject", { object: { id: cur.id, title: objTitle(cur), data: cur.data, photos: photoMeta(), files: fileMeta(), created: cur.created }, baseVersion: cur.version || 0, force: !!force, protocol: protocol() });
   cur.version = r.version; cur.folderUrl = r.folderUrl; await store.put("objects", cur);
 }
 async function syncNow(force = false) {
@@ -614,9 +739,15 @@ async function syncNow(force = false) {
       p.fileId = r.fileId; await store.put("photos", cleanPhoto(p));
       n++; slog(`Foto ${n}/${todo.length} übertragen`, "o"); bar(15 + 75 * n / todo.length);
     }
-    cur.pendingPhotos = curPhotos.some(p => !p.fileId);
-    if (todo.length || curPhotos.some(p => p.fileId)) await saveRemote(true);
-    cur.dirty = false; cur.serverNewer = 0; cur.lastSync = new Date().toISOString(); await store.put("objects", cur); bar(100);
+    const ftodo = curFiles.filter(f => !f.fileId && f.blob); let k = 0;
+    for (const f of ftodo) {
+      const r = await api("uploadDoc", { objectId: cur.id, name: f.name, mime: f.mime, docType: docLabel(f.docRow), b64: await blobToB64(f.blob) });
+      f.fileId = r.fileId; await store.put("files", f);
+      k++; slog(`Unterlage ${k}/${ftodo.length} übertragen`, "o");
+    }
+    cur.pendingPhotos = curPhotos.some(p => !p.fileId) || curFiles.some(f => !f.fileId);
+    if (todo.length || ftodo.length || curPhotos.some(p => p.fileId) || curFiles.some(f => f.fileId)) await saveRemote(true);
+    cur.dirty = false; cur.serverNewer = 0; cur.goneOnServer = false; cur.lastSync = new Date().toISOString(); await store.put("objects", cur); bar(100);
     slog("Abgleich abgeschlossen. Daten, Fotos und Protokoll liegen im Büro-Drive.", "o");
   } catch (e) {
     if (e.code === "conflict") {
@@ -667,13 +798,24 @@ function adminUsers(users) {
     } catch (x) { toast(x.message); }
   };
 }
+function adminDelete(id, title) {
+  sheet(`<h2>Objekt löschen?</h2><p style="margin:0"><b>${esc(title)}</b> wird für alle Nutzer gelöscht. Der Drive-Ordner mit Fotos, Unterlagen und Protokoll kommt in den Google-Drive-Papierkorb und kann dort 30 Tage lang wiederhergestellt werden.</p>
+    <label class="fld"><span>Zur Bestätigung LÖSCHEN eintippen</span><input type="text" id="delConfirm" autocomplete="off"></label>
+    <div style="display:flex;gap:10px"><button class="btn" data-close style="flex:1">Abbrechen</button><button class="btn danger" id="delGo" style="flex:1" disabled>Endgültig löschen</button></div>`);
+  $("#delConfirm").oninput = e => { $("#delGo").disabled = e.target.value.trim().toUpperCase() !== "LÖSCHEN"; };
+  $("#delGo").onclick = async () => {
+    $("#delGo").disabled = true;
+    try { await api("deleteObject", { objectId: id }); await removeLocal(id); remote = remote.filter(x => x.id !== id); closeSheet(); toast("Objekt gelöscht"); if (view === "admin") renderAdmin("access"); else { cur = null; renderHome(false); } }
+    catch (e) { toast(e.message); $("#delGo").disabled = false; }
+  };
+}
 function adminAccess(objs, users) {
   const ok = users.filter(u => u.status === "freigegeben");
   $("#adm").innerHTML = objs.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b><span style="color:var(--muted);font-size:13px">angelegt von ${esc(o.creator)}</span></div>
     <div class="emails">${o.access.map(m => `<span>${esc(m)}<button type="button" aria-label="Zugriff entfernen" data-rm="${esc(o.id)}" data-m="${esc(m)}">×</button></span>`).join("") || `<span style="color:var(--muted)">nur Ersteller und Admins</span>`}</div>
-    <div style="display:flex;gap:6px"><select data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Benutzer hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select></div></div>`).join("") || `<div class="empty">Noch keine Objekte auf dem Server.</div>`;
+    <div style="display:flex;gap:6px"><select data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Benutzer hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select><button type="button" class="btn small danger" data-odel="${esc(o.id)}">Löschen</button></div></div>`).join("") || `<div class="empty">Noch keine Objekte auf dem Server.</div>`;
   const save = async (o, list) => { try { await api("setAccess", { objectId: o.id, emails: list }); toast("Zugriff gespeichert"); renderAdmin("access"); } catch (x) { toast(x.message); } };
-  $("#adm").onclick = e => { const b = e.target.closest("[data-rm]"); if (!b) return; const o = objs.find(x => x.id === b.dataset.rm); save(o, o.access.filter(m => m !== b.dataset.m)); };
+  $("#adm").onclick = e => { const od = e.target.closest("[data-odel]"); if (od) { const o = objs.find(x => x.id === od.dataset.odel); return adminDelete(o.id, o.title || "Ohne Bezeichnung"); } const b = e.target.closest("[data-rm]"); if (!b) return; const o = objs.find(x => x.id === b.dataset.rm); save(o, o.access.filter(m => m !== b.dataset.m)); };
   $("#adm").onchange = e => { const s = e.target.closest("[data-sel]"); if (!s || !s.value) return; const o = objs.find(x => x.id === s.dataset.sel); save(o, [...o.access, s.value]); };
 }
 

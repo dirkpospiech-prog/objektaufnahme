@@ -165,6 +165,20 @@ input:focus, textarea:focus, select:focus { border-color: var(--brand); outline:
 .stdall { background: var(--brand-soft); padding: 12px; }
 .ph select { font-size: 13px; min-height: 36px; padding: 4px 8px; }
 
+/* Unterlagen */
+.actions.stack { flex-direction: column; }
+.actions.stack .btn { flex: none; width: 100%; white-space: normal; }
+.scanbox { background: var(--brand-soft); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.scanthumbs { display: flex; gap: 8px; overflow-x: auto; }
+.scanthumbs img { height: 110px; width: auto; border: 1px solid var(--line-strong); background: #fff; }
+.filelist { display: flex; flex-direction: column; gap: 8px; }
+.filerow { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px 10px; background: var(--card); border: 1px solid var(--line); padding: 10px 12px; }
+.ficon { font-size: 11px; font-weight: 700; background: var(--brand); color: var(--brand-fg); display: grid; place-items: center; height: 44px; }
+.finfo { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; color: var(--muted); }
+.finfo b { font-size: 15px; color: var(--ink-strong); }
+.finfo span { overflow-wrap: anywhere; }
+.factions { grid-column: 2; display: flex; gap: 6px; }
+
 /* Fotos */
 .photogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .ph { background: var(--card); border: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }

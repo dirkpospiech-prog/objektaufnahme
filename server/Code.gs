@@ -101,6 +101,8 @@ const ROUTES = {
   getObject: getObject,
   saveObject: saveObject,
   uploadPhoto: uploadPhoto,
+  uploadDoc: uploadDoc,
+  deleteObject: deleteObject,
   getPhoto: getPhoto,
   // Admin
   listUsers: function (r) { requireAdmin(r); return { ok: true, users: table(SHEETS.users).rows.map(publicUser) }; },
@@ -247,7 +249,7 @@ function saveObject(r) {
       o = findObject(obj.id);
     }
     const version = Number(o.version || 0) + 1;
-    const content = JSON.stringify({ id: obj.id, title: obj.title || '', data: obj.data || {}, photos: obj.photos || [], created: obj.created || now.toISOString(), updated: now.toISOString(), updatedBy: u.email, version: version });
+    const content = JSON.stringify({ id: obj.id, title: obj.title || '', data: obj.data || {}, photos: obj.photos || [], files: obj.files || [], created: obj.created || now.toISOString(), updated: now.toISOString(), updatedBy: u.email, version: version });
     const it = folder.getFilesByName('aufnahme.json');
     if (it.hasNext()) it.next().setContent(content);
     else folder.createFile('aufnahme.json', content, 'application/json');
@@ -317,6 +319,39 @@ function getPhoto(r) {
   return { ok: true, mime: blob.getContentType(), b64: Utilities.base64Encode(blob.getBytes()) };
 }
 
+/** Unterlagen (PDF oder Bild) im Unterordner „Unterlagen“ ablegen */
+function uploadDoc(r) {
+  const u = auth(r);
+  const o = findObject(r.objectId);
+  if (!o || !canAccess(u, o)) return fail('not_found', 'Objekt nicht gefunden oder kein Zugriff. Bitte zuerst die Aufnahme speichern.');
+  const name = safeName(String(r.name || 'Unterlage.pdf'));
+  const mime = String(r.mime || '');
+  if (['application/pdf', 'image/jpeg', 'image/png'].indexOf(mime) < 0) return fail('invalid', 'Nur PDF, JPG oder PNG sind erlaubt.');
+  const folder = subFolder(o.folderId, 'Unterlagen');
+  const existing = folder.getFilesByName(name);
+  if (existing.hasNext()) return { ok: true, fileId: existing.next().getId(), existed: true };
+  const bytes = Utilities.base64Decode(String(r.b64 || ''));
+  if (bytes.length < 100) return fail('invalid', 'Datei ist leer.');
+  if (bytes.length > 25 * 1024 * 1024) return fail('invalid', 'Datei ist zu groß (max. 25 MB).');
+  const file = folder.createFile(Utilities.newBlob(bytes, mime, name));
+  if (r.docType) file.setDescription(String(r.docType).slice(0, 300));
+  log(u.email, 'Unterlage hochgeladen', o.id + ': ' + name);
+  return { ok: true, fileId: file.getId() };
+}
+
+/** Objekt löschen (nur Admin): Drive-Ordner in den Papierkorb (30 Tage wiederherstellbar), Eintrag entfernen */
+function deleteObject(r) {
+  const admin = requireAdmin(r);
+  return withLock(function () {
+    const o = findObject(r.objectId);
+    if (!o) return fail('not_found', 'Objekt nicht gefunden.');
+    try { DriveApp.getFolderById(o.folderId).setTrashed(true); } catch (e) { console.warn('Ordner: ' + e); }
+    sheet(SHEETS.objects).deleteRow(o._row);
+    log(admin.email, 'Objekt gelöscht', o.id + ' ' + o.title + ' (Ordner im Papierkorb)');
+    return { ok: true };
+  });
+}
+
 function setAccess(r) {
   const admin = requireAdmin(r);
   const o = findObject(r.objectId);
@@ -361,6 +396,11 @@ function table(def) {
 }
 function findUser(email) { return table(SHEETS.users).rows.filter(function (u) { return u.email === email; })[0] || null; }
 function findObject(id) { return table(SHEETS.objects).rows.filter(function (o) { return String(o.id) === String(id); })[0] || null; }
+function subFolder(folderId, name) {
+  const parent = DriveApp.getFolderById(folderId);
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
 function fotosFolder(folderId) {
   const parent = DriveApp.getFolderById(folderId);
   const it = parent.getFoldersByName('Fotos');
