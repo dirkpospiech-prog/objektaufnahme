@@ -27,12 +27,12 @@ const CONFIG = {
 
 const SHEETS = {
   users: { name: 'Benutzer', head: ['E-Mail', 'Name', 'Status', 'Rolle', 'Beantragt am', 'Freigegeben am', 'Letzter Login', 'Hash', 'Salt'] },
-  objects: { name: 'Objekte', head: ['Objekt-ID', 'Bezeichnung', 'Drive-Ordner', 'Angelegt von', 'Zugriff (E-Mails, mit Komma getrennt)', 'Angelegt am', 'Geändert am', 'Geändert von', 'Version', 'Ordner-ID', 'Eigentümer (Kunde)', 'Eigentümer-Status'] },
+  objects: { name: 'Objekte', head: ['Objekt-ID', 'Bezeichnung', 'Drive-Ordner', 'Angelegt von', 'Zugriff (E-Mails, mit Komma getrennt)', 'Angelegt am', 'Geändert am', 'Geändert von', 'Version', 'Ordner-ID', 'Eigentümer (Kunde)', 'Eigentümer-Status', 'Archiviert am'] },
   invites: { name: 'Einladungen', head: ['Token-Hash', 'E-Mail', 'Name', 'Objekt-ID', 'Erstellt', 'Gültig bis', 'Eingelöst', 'Rolle'] },
   sessions: { name: 'Sitzungen', head: ['Token-Hash', 'E-Mail', 'Gültig bis'] },
   log: { name: 'Protokoll', head: ['Zeit', 'E-Mail', 'Aktion', 'Details'] }
 };
-const STATUS = { REQ: 'beantragt', OK: 'freigegeben', BLOCKED: 'gesperrt' };
+const STATUS = { REQ: 'beantragt', OK: 'freigegeben', BLOCKED: 'gesperrt', ARCH: 'archiviert' };
 const ROLE = { USER: 'nutzer', ADMIN: 'admin', KUNDE: 'kunde' };
 const KSTATUS = { OPEN: 'offen', DONE: 'übergeben' };
 
@@ -59,7 +59,7 @@ function setup() {
   if (first && ss.getSheets().length > 1) ss.deleteSheet(first);
 
   const users = ss.getSheetByName(SHEETS.users.name);
-  users.getRange('C2:C1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([STATUS.REQ, STATUS.OK, STATUS.BLOCKED], true).build());
+  users.getRange('C2:C1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([STATUS.REQ, STATUS.OK, STATUS.BLOCKED, STATUS.ARCH], true).build());
   users.getRange('D2:D1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([ROLE.USER, ROLE.ADMIN, ROLE.KUNDE], true).build());
   users.hideColumns(8, 2);
   users.setColumnWidths(1, 7, 160);
@@ -122,6 +122,7 @@ const ROUTES = {
   inviteInfo: inviteInfo,
   setUser: setUser,
   deleteUser: deleteUser,
+  archiveObject: archiveObject,
   resetPassword: resetPassword,
   setAccess: setAccess,
   createInvite: createInvite,
@@ -167,6 +168,7 @@ function login(r) {
   }
   cache.remove(key);
   if (u.status === STATUS.REQ) return fail('pending', 'Ihr Zugang ist noch nicht freigegeben. Der Admin wurde informiert.');
+  if (u.status === STATUS.ARCH) return fail('blocked', 'Ihr Zugang wurde abgeschlossen. Bei Fragen wenden Sie sich bitte an Immobilien Pospiech.');
   if (u.status !== STATUS.OK) return fail('blocked', 'Ihr Zugang ist gesperrt. Bitte wenden Sie sich an das Büro.');
   const token = Utilities.getUuid() + Utilities.getUuid();
   const until = new Date(Date.now() + CONFIG.SESSION_DAYS * 864e5);
@@ -193,21 +195,40 @@ function setUser(r) {
   const email = normEmail(r.email);
   const u = findUser(email);
   if (!u) return fail('not_found', 'Benutzer nicht gefunden.');
-  if (email === admin.email && (r.status === STATUS.BLOCKED || r.role === ROLE.USER)) return fail('invalid', 'Sie können sich nicht selbst sperren oder die Admin-Rolle entziehen.');
+  if (email === admin.email && (r.status === STATUS.BLOCKED || r.status === STATUS.ARCH || r.role === ROLE.USER)) return fail('invalid', 'Sie können sich nicht selbst sperren oder die Admin-Rolle entziehen.');
   withLock(function () {
     const sh = sheet(SHEETS.users);
-    if (r.status && [STATUS.REQ, STATUS.OK, STATUS.BLOCKED].indexOf(r.status) >= 0) {
+    if (r.status && [STATUS.REQ, STATUS.OK, STATUS.BLOCKED, STATUS.ARCH].indexOf(r.status) >= 0) {
       sh.getRange(u._row, 3).setValue(r.status);
       if (r.status === STATUS.OK && !u.approvedAt) sh.getRange(u._row, 6).setValue(new Date());
     }
     if (r.role && [ROLE.USER, ROLE.ADMIN].indexOf(r.role) >= 0 && u.role !== ROLE.KUNDE) sh.getRange(u._row, 4).setValue(r.role);
   });
-  if (r.status === STATUS.BLOCKED) deleteSessionsOf(email);
+  if (r.status === STATUS.BLOCKED || r.status === STATUS.ARCH) deleteSessionsOf(email);
   if (r.status === STATUS.OK && u.status !== STATUS.OK && u.role !== ROLE.KUNDE) {
     try { MailApp.sendEmail(email, CONFIG.APP_NAME + ': Zugang freigegeben', 'Hallo ' + u.name + ',\n\nIhr Zugang zur Objektaufnahme-App wurde freigegeben. Sie können sich jetzt mit Ihrer E-Mail-Adresse und Ihrem Passwort anmelden.\n\nImmobilien Pospiech GbR'); } catch (e) { console.warn(e); }
   }
   log(admin.email, 'Benutzer geändert', email + ' ' + (r.status || '') + ' ' + (r.role || ''));
   return { ok: true };
+}
+
+/** Admin archiviert ein Objekt (oder holt es zurück): unsichtbar für Kollegen und Eigentümer, Ordner wandert in „Archiv“ */
+function archiveObject(r) {
+  const admin = requireAdmin(r);
+  ensureCols();
+  const o = findObject(r.objectId);
+  if (!o) return fail('not_found', 'Objekt nicht gefunden.');
+  const on = r.archive !== false, now = new Date();
+  withLock(function () {
+    sheet(SHEETS.objects).getRange(o._row, 13).setValue(on ? now : '');
+    try {
+      const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID), folder = DriveApp.getFolderById(o.folderId);
+      if (on) { const it = root.getFoldersByName('Archiv'); folder.moveTo(it.hasNext() ? it.next() : root.createFolder('Archiv')); }
+      else folder.moveTo(root);
+    } catch (e) { console.warn('Archiv-Ordner: ' + e); }
+  });
+  log(admin.email, on ? 'Objekt archiviert' : 'Objekt aus Archiv geholt', o.id + ' ' + (o.title || ''));
+  return { ok: true, archived: on ? now.toISOString() : '' };
 }
 
 function deleteUser(r) {
@@ -253,6 +274,7 @@ function resetPassword(r) {
 /* ======================= Objekte ======================= */
 function canAccess(u, o) {
   if (u.role === ROLE.ADMIN) return true;
+  if (o.archived) return false;   // archivierte Objekte sieht nur der Admin
   if (u.role === ROLE.KUNDE) return normEmail(o.kunde) === u.email;
   if (o.creator === u.email) return true;
   return splitEmails(o.access).indexOf(u.email) >= 0;
@@ -260,7 +282,8 @@ function canAccess(u, o) {
 
 function listObjects(r) {
   const u = auth(r);
-  let list = table(SHEETS.objects).rows.filter(function (o) { return canAccess(u, o); }).map(publicObject);
+  const withArch = u.role === ROLE.ADMIN && r.withArchived === true;
+  let list = table(SHEETS.objects).rows.filter(function (o) { return canAccess(u, o) && (withArch || !o.archived); }).map(publicObject);
   if (u.role === ROLE.KUNDE) list = list.map(function (o) { return { id: o.id, title: o.title, version: o.version, updated: o.updated, kunde: o.kunde, kstatus: o.kstatus || KSTATUS.OPEN, creator: 'Immobilien Pospiech', access: [] }; });
   return { ok: true, objects: list };
 }
@@ -463,7 +486,8 @@ function deleteObject(r) {
 /* ======================= Eigentümer (Kunden) ======================= */
 function ensureCols() {
   const sh = sheet(SHEETS.objects);
-  if (sh.getRange(1, 11).getValue() !== SHEETS.objects.head[10]) sh.getRange(1, 1, 1, SHEETS.objects.head.length).setValues([SHEETS.objects.head]);
+  if (sh.getRange(1, 13).getValue() !== SHEETS.objects.head[12]) sh.getRange(1, 1, 1, SHEETS.objects.head.length).setValues([SHEETS.objects.head]);
+  try { sheet(SHEETS.users).getRange('C2:C1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([STATUS.REQ, STATUS.OK, STATUS.BLOCKED, STATUS.ARCH], true).build()); } catch (e) {}
   try { sheet(SHEETS.users).getRange('D2:D1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([ROLE.USER, ROLE.ADMIN, ROLE.KUNDE], true).build()); } catch (e) {}
   const book = ss();
   if (!book.getSheetByName(SHEETS.invites.name)) {
@@ -633,7 +657,7 @@ function log(email, action, details) { try { sheet(SHEETS.log).appendRow([new Da
 
 const FIELDS = {
   'Benutzer': ['email', 'name', 'status', 'role', 'requestedAt', 'approvedAt', 'lastLogin', 'hash', 'salt'],
-  'Objekte': ['id', 'title', 'folderUrl', 'creator', 'access', 'created', 'updated', 'updatedBy', 'version', 'folderId', 'kunde', 'kstatus'],
+  'Objekte': ['id', 'title', 'folderUrl', 'creator', 'access', 'created', 'updated', 'updatedBy', 'version', 'folderId', 'kunde', 'kstatus', 'archived'],
   'Einladungen': ['tokenHash', 'email', 'name', 'objectId', 'created', 'until', 'used', 'role'],
   'Sitzungen': ['tokenHash', 'email', 'until']
 };
@@ -662,7 +686,7 @@ function publicUser(u) {
   return { email: u.email, name: u.name, status: u.status, role: u.role, requestedAt: d(u.requestedAt), lastLogin: d(u.lastLogin) };
 }
 function publicObject(o) {
-  return { id: String(o.id), title: o.title, creator: o.creator, access: splitEmails(o.access), updated: o.updated instanceof Date ? o.updated.toISOString() : '', updatedBy: o.updatedBy, version: Number(o.version || 0), folderUrl: o.folderUrl, kunde: normEmail(o.kunde), kstatus: o.kstatus || '' };
+  return { id: String(o.id), title: o.title, creator: o.creator, access: splitEmails(o.access), updated: o.updated instanceof Date ? o.updated.toISOString() : '', updatedBy: o.updatedBy, version: Number(o.version || 0), folderUrl: o.folderUrl, kunde: normEmail(o.kunde), kstatus: o.kstatus || '', archived: o.archived instanceof Date ? o.archived.toISOString() : (o.archived ? String(o.archived) : '') };
 }
 function auth(r) {
   const token = String(r.token || '');

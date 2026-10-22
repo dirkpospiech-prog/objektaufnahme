@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.13.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -839,9 +839,13 @@ function objMenu() {
     ${cur.version ? `<button class="btn" id="reload">Neueste Fassung vom Server laden</button>` : ""}
     <button class="btn" id="delObj">Nur von diesem Gerät entfernen</button>
     ${isAdmin() ? `<button class="btn" id="invK">${cur.kunde ? "Eigentümer erneut einladen" : "Eigentümer einladen"}</button>` : ""}
-    ${isAdmin() && cur.version ? `<button class="btn danger" id="delAll">Objekt löschen (für alle)</button>` : ""}
+    ${isAdmin() && cur.version ? `<button class="btn" id="archObj">Objekt archivieren</button><button class="btn danger" id="delAll">Objekt löschen (für alle)</button>` : ""}
     <button class="btn" data-close>Schließen</button>`);
   const da = $("#delAll"); if (da) da.onclick = () => adminDelete(cur.id, objTitle(cur));
+  const ao = $("#archObj"); if (ao) ao.onclick = async () => {
+    if (cur.dirty || cur.pendingPhotos) return toast("Bitte zuerst abgleichen – dann archivieren.");
+    archiveSheet({ id: cur.id, title: objTitle(cur), kunde: cur.kunde }, true, () => { cur = null; renderHome(false); });
+  };
   const ik = $("#invK"); if (ik) ik.onclick = () => { if (!cur.version) return toast("Bitte die Aufnahme zuerst einmal abgleichen."); inviteSheet(cur.id, objTitle(cur), cur.kunde); };
   const rl = $("#reload"); if (rl) rl.onclick = () => {
     const doIt = async () => { try { await loadServerObject(cur.id); closeSheet(); openObject(cur.id, secIdx); toast("Neueste Fassung geladen"); } catch (e) { toast(e.message); } };
@@ -970,7 +974,7 @@ async function renderAdmin(tab = "users", push = false) {
     const resp = await api("listUsers"), users = resp.users;
     const inv = resp.invites || [];
     if (tab === "users") return adminUsers(users.filter(u => u.role !== "kunde"), inv.filter(v => v.role !== "kunde"));
-    const objs = (await api("listObjects")).objects;
+    const objs = (await api("listObjects", { withArchived: true })).objects;
     if (tab === "kunden") return adminKunden(objs, users, inv.filter(v => v.role === "kunde"));
     adminAccess(objs, users.filter(u => u.role !== "kunde"));
   } catch (e) { $("#adm").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
@@ -979,7 +983,7 @@ async function renderAdmin(tab = "users", push = false) {
 function controlSheet({ title, html, label, danger = false, typed = false, fn }) {
   sheet(`<h2>${esc(title)}</h2><div style="margin:0">${html}</div>
     ${typed ? `<label class="fld"><span>Zur Bestätigung LÖSCHEN eintippen</span><input type="text" id="ctlTxt" autocomplete="off"></label>` : ""}
-    <div style="display:flex;gap:10px"><button class="btn" data-close style="flex:1">Abbrechen</button><button class="btn ${danger ? "danger" : "primary"}" id="ctlOk" style="flex:1"${typed ? " disabled" : ""}>${esc(label)}</button></div>`);
+    <div class="actbar"><button class="btn" data-close>Abbrechen</button><button class="btn ${danger ? "danger" : "primary"}" id="ctlOk"${typed ? " disabled" : ""}>${esc(label)}</button></div>`);
   if (typed) $("#ctlTxt").oninput = e => { $("#ctlOk").disabled = e.target.value.trim().toUpperCase() !== "LÖSCHEN"; };
   $("#ctlOk").onclick = async () => { $("#ctlOk").disabled = true; try { await fn(); } catch (x) { toast(x.message); $("#ctlOk").disabled = false; } };
 }
@@ -1002,15 +1006,16 @@ function deleteUserSheet(email, name, extra, back) {
 }
 const ROLE_LBL = r => r === "admin" ? "Admin" : "Kollege";
 function staffInviteSheet(pre = {}) {
-  sheet(`<h2>Mitarbeiter einladen</h2><p style="margin:0">Die Person erhält eine E-Mail mit einem persönlichen Link, legt ihr Passwort selbst fest und kann sofort loslegen – eine Freigabe ist nicht mehr nötig.</p>
+  sheet(`<h2>Mitarbeiter einladen</h2><p style="margin:0;font-size:14px;color:var(--muted)">Die Person bekommt eine E-Mail mit persönlichem Link und legt ihr Passwort selbst fest.</p>
     <form id="siForm" style="display:flex;flex-direction:column;gap:10px" novalidate>
       <label class="fld"><span>Name</span><input type="text" id="si_name" value="${esc(pre.name || "")}" autocomplete="off"></label>
       <label class="fld"><span>E-Mail-Adresse</span><input type="email" id="si_mail" value="${esc(pre.email || "")}" autocomplete="off"></label>
       <div class="fld"><span>Rolle</span><div class="rolepick">
-        <label class="rp"><input type="radio" name="si_role" value="nutzer"${pre.role !== "admin" ? " checked" : ""}><span><b>Kollege</b>Sieht und bearbeitet eigene und ihm zugewiesene Objekte.</span></label>
-        <label class="rp"><input type="radio" name="si_role" value="admin"${pre.role === "admin" ? " checked" : ""}><span><b>Admin</b>Sieht alle Objekte und verwaltet Mitarbeiter, Eigentümer und Objekte (inkl. Löschen).</span></label></div></div>
-      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="si_send" checked> Einladung per E-Mail senden</label>
-      <div id="siMsg"></div><button class="btn primary" type="submit" id="siGo">Einladen</button></form><button class="btn" data-close>Schließen</button>`);
+        <label class="rp"><input type="radio" name="si_role" value="nutzer"${pre.role !== "admin" ? " checked" : ""}><span><b>Kollege</b>eigene und zugewiesene Objekte</span></label>
+        <label class="rp"><input type="radio" name="si_role" value="admin"${pre.role === "admin" ? " checked" : ""}><span><b>Admin</b>alle Objekte, Verwaltung und Löschen</span></label></div></div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:15px"><input type="checkbox" id="si_send" checked> Einladung per E-Mail senden</label>
+      <div id="siMsg"></div>
+      <div class="actbar"><button class="btn" type="button" data-close>Abbrechen</button><button class="btn primary" type="submit" id="siGo">Einladen</button></div></form>`);
   $("#siForm").onsubmit = ev => {
     ev.preventDefault();
     const name = $("#si_name").value.trim(), email = $("#si_mail").value.trim(), role = (document.querySelector('[name="si_role"]:checked') || {}).value || "nutzer", send = $("#si_send").checked;
@@ -1060,20 +1065,22 @@ function adminUsers(users, invites = []) {
   };
 }
 function inviteSheet(objectId, title, email) {
-  sheet(`<h2>Eigentümer einladen</h2><p style="margin:0">${objectId ? `Für <b>${esc(title)}</b>.` : "Legt ein neues Objekt an und lädt den Eigentümer dazu ein."} Der Eigentümer erhält einen persönlichen Link, vergibt ein Passwort und sieht nur den Verkaufs-Fragebogen zu diesem Objekt.</p>
+  sheet(`<h2>Eigentümer einladen</h2><p style="margin:0;font-size:14px;color:var(--muted)">${objectId ? `Für <b>${esc(title)}</b>. ` : "Legt ein neues Objekt an. "}Der Eigentümer bekommt einen persönlichen Link und sieht nur den Fragebogen zu diesem Objekt.</p>
     <form id="invForm" style="display:flex;flex-direction:column;gap:10px" novalidate>
       ${objectId ? "" : `<label class="fld"><span>Adresse des Objekts</span><input type="text" id="inv_title" placeholder="Straße Nr., Ort" required></label>`}
       <label class="fld"><span>Name des Eigentümers</span><input type="text" id="inv_name" autocomplete="off" required></label>
       <label class="fld"><span>E-Mail-Adresse</span><input type="email" id="inv_mail" value="${esc(email || "")}" autocomplete="off" required></label>
-      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="inv_send" checked> Einladung per E-Mail senden</label>
-      <div id="invMsg"></div><button class="btn primary" type="submit" id="invGo">Einladen</button></form><button class="btn" data-close>Schließen</button>`);
+      <label style="display:flex;gap:8px;align-items:center;font-size:15px"><input type="checkbox" id="inv_send" checked> Einladung per E-Mail senden</label>
+      <div id="invMsg"></div>
+      <div class="actbar"><button class="btn" type="button" data-close>Abbrechen</button><button class="btn primary" type="submit" id="invGo">Einladen</button></div></form>`);
   $("#invForm").onsubmit = async ev => {
     ev.preventDefault(); $("#invGo").disabled = true;
     const mail = $("#inv_mail").value.trim().toLowerCase();
     try {
       const r = await api("createInvite", { objectId: objectId || "", title: objectId ? "" : $("#inv_title").value.trim(), name: $("#inv_name").value.trim(), email: $("#inv_mail").value.trim(), sendMail: $("#inv_send").checked });
       $("#invForm").innerHTML = `<div class="msg ok">${r.mailed ? "Die Einladung wurde per E-Mail verschickt." : "Einladung erstellt."} ${r.existing ? "Der Eigentümer hat schon einen Zugang und sieht das Objekt beim nächsten Anmelden." : "Sie können den Link auch selbst weitergeben (z. B. per SMS oder WhatsApp):"}</div>
-        ${r.existing ? "" : `<div style="font-size:14px;word-break:break-all;user-select:all;padding:10px;background:var(--sunk)" id="invLink">${esc(r.link)}</div><button type="button" class="btn" id="invCopy">Link kopieren</button>`}`;
+        ${r.existing ? "" : `<div style="font-size:14px;word-break:break-all;user-select:all;padding:10px;background:var(--sunk)" id="invLink">${esc(r.link)}</div><button type="button" class="btn" id="invCopy">Link kopieren</button>`}
+        <button type="button" class="btn primary" data-close>Fertig</button>`;
       const cp = $("#invCopy"); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(r.link); toast("Link kopiert"); } catch (e) { toast("Bitte den Link markieren und kopieren"); } };
       refreshRemote.at = 0;
       if (cur && cur.id === r.objectId) { cur.kunde = mail; cur.kstatus = "offen"; await store.put("objects", cur); if (view === "obj") renderObj(); }
@@ -1110,22 +1117,29 @@ function adminDelete(id, title) {
     catch (e) { toast(e.message); $("#delGo").disabled = false; }
   };
 }
+const kchip = o => `<span class="chip ${o.kstatus === "übergeben" ? "ok" : "warn"}">${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span>`;
+function archToggle(title, n) { return `<details class="arch"><summary>${esc(title)} (${n})</summary>`; }
 function adminKunden(objs, users, kinv = []) {
   // Eigentümer = Zugänge mit Rolle „kunde“ plus offene Einladungen (Objekt mit Eigentümer, aber noch kein Zugang)
   const by = new Map();
   users.filter(u => u.role === "kunde").forEach(u => by.set(u.email, { email: u.email, user: u, objs: [] }));
   objs.filter(o => o.kunde).forEach(o => { const k = o.kunde; if (!by.has(k)) by.set(k, { email: k, user: null, objs: [] }); by.get(k).objs.push(o); });
   kinv.forEach(v => { if (by.has(v.email)) by.get(v.email).invName = v.name; });
-  const list = [...by.values()].sort((a, b) => ((a.user && a.user.name) || a.email).localeCompare((b.user && b.user.name) || b.email));
-  const chip = x => !x.user ? `<span class="chip warn">Einladung offen</span>` : x.user.status === "gesperrt" ? `<span class="chip new">gesperrt</span>` : `<span class="chip ok">aktiv</span>`;
+  const all = [...by.values()].sort((a, b) => ((a.user && a.user.name) || a.invName || a.email).localeCompare((b.user && b.user.name) || b.invName || b.email));
+  const isArch = x => x.user ? x.user.status === "archiviert" : x.objs.length > 0 && x.objs.every(o => o.archived);
+  const chip = x => isArch(x) ? `<span class="chip new">archiviert</span>` : !x.user ? `<span class="chip warn">Einladung offen</span>` : x.user.status === "gesperrt" ? `<span class="chip new">gesperrt</span>` : `<span class="chip ok">aktiv</span>`;
+  const card = (x, i) => `<div class="admin-row"><div class="who"><b>${esc((x.user && x.user.name) || x.invName || x.email)}</b>${chip(x)}</div>
+      <div class="meta">${esc(x.email)}${x.user && x.user.lastLogin ? "<br>zuletzt angemeldet " + esc(fmtTime(x.user.lastLogin)) : ""}</div>
+      ${x.objs.map(o => `<div class="kobj"><b>${esc(o.title || "Ohne Bezeichnung")}</b><div class="meta">${kchip(o)}${o.archived ? ` <span class="chip new">Objekt archiviert</span>` : ""} zuletzt ${esc(fmtTime(o.updated))}</div>
+        ${isArch(x) ? "" : `<div class="btns">${o.kstatus === "übergeben" ? `<button class="btn small" data-ka="reopen" data-o="${esc(o.id)}">Wieder freigeben</button>` : ""}<button class="btn small" data-ka="inv" data-o="${esc(o.id)}">Einladung erneut senden</button></div>`}</div>`).join("") || `<div class="meta">Keinem Objekt zugeordnet.</div>`}
+      <div class="btns">${isArch(x) ? `<button class="btn small primary" data-ka="unarch" data-i="${i}">Wiederherstellen</button>`
+        : `${x.user ? `<button class="btn small" data-ka="block" data-i="${i}">${x.user.status === "gesperrt" ? "Entsperren" : "Sperren"}</button><button class="btn small" data-ka="pw" data-i="${i}">Neues Passwort</button>` : ""}<button class="btn small" data-ka="arch" data-i="${i}">Archivieren</button>`}
+        <button class="btn small danger" data-ka="del" data-i="${i}">${x.user ? "Zugang löschen" : "Einladung zurückziehen"}</button></div></div>`;
+  const act = all.map((x, i) => [x, i]).filter(([x]) => !isArch(x)), arc = all.map((x, i) => [x, i]).filter(([x]) => isArch(x));
   $("#adm").innerHTML = `<button type="button" class="btn primary" id="newInv">${ICON.plus}Eigentümer einladen</button>
     <div class="admhint">Für ein bestehendes Objekt: Aufnahme öffnen → ⋯ → Eigentümer einladen.</div>` +
-    (list.map((x, i) => `<div class="admin-row"><div class="who"><b>${esc((x.user && x.user.name) || x.invName || x.email)}</b>${chip(x)}</div>
-      <div class="meta">${esc(x.email)}${x.user && x.user.lastLogin ? "<br>zuletzt angemeldet " + esc(fmtTime(x.user.lastLogin)) : ""}</div>
-      ${x.objs.map(o => `<div class="kobj"><b>${esc(o.title || "Ohne Bezeichnung")}</b><div class="meta"><span class="chip ${o.kstatus === "übergeben" ? "ok" : "warn"}">${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span> zuletzt ${esc(fmtTime(o.updated))}</div>
-        <div class="btns">${o.kstatus === "übergeben" ? `<button class="btn small" data-ka="reopen" data-o="${esc(o.id)}">Wieder freigeben</button>` : ""}<button class="btn small" data-ka="inv" data-o="${esc(o.id)}">Einladung erneut senden</button></div></div>`).join("") || `<div class="meta">Keinem Objekt zugeordnet.</div>`}
-      <div class="btns">${x.user ? `<button class="btn small" data-ka="block" data-i="${i}">${x.user.status === "gesperrt" ? "Entsperren" : "Sperren"}</button><button class="btn small" data-ka="pw" data-i="${i}">Neues Passwort</button>` : ""}
-        <button class="btn small danger" data-ka="del" data-i="${i}">${x.user ? "Zugang löschen" : "Einladung zurückziehen"}</button></div></div>`).join("") || `<div class="empty">Noch keine Eigentümer eingeladen.</div>`);
+    (act.map(([x, i]) => card(x, i)).join("") || `<div class="empty">Keine aktiven Eigentümer.</div>`) +
+    (arc.length ? `${archToggle("Archiv", arc.length)}<div class="list">${arc.map(([x, i]) => card(x, i)).join("")}</div></details>` : "");
   const back = () => renderAdmin("kunden");
   $("#adm").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
@@ -1139,26 +1153,47 @@ function adminKunden(objs, users, kinv = []) {
         fn: async () => { await api("reopenKunde", { objectId: o.id }); closeSheet(); toast("Wieder freigegeben"); back(); } });
       return;
     }
-    const x = list[+b.dataset.i]; if (!x) return; const nm = (x.user && x.user.name) || "";
+    const x = all[+b.dataset.i]; if (!x) return; const nm = (x.user && x.user.name) || x.invName || "";
     if (a === "block") return blockSheet(x.user, back);
     if (a === "pw") return resetPwSheet(x.email, nm, null);
+    if (a === "arch" || a === "unarch") {
+      const on = a === "arch", objsTxt = x.objs.length ? `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px"><input type="checkbox" id="archObjs" checked style="margin-top:4px"> ${on ? "Zugehörige Objekte ebenfalls archivieren" : "Zugehörige Objekte ebenfalls zurückholen"} (${x.objs.map(o => esc(o.title || "")).join(", ")})</label>` : "";
+      return controlSheet({ title: on ? "Eigentümer archivieren?" : "Eigentümer wiederherstellen?", label: on ? "Archivieren" : "Wiederherstellen",
+        html: `<p style="margin:0">${on ? `Der Zugang von <b>${esc(nm || x.email)}</b> wird beendet – er kann sich nicht mehr anmelden. Angaben, Fotos und Unterlagen bleiben vollständig erhalten; Sie finden ihn unten im Archiv und können ihn jederzeit wiederherstellen.` : `<b>${esc(nm || x.email)}</b> kann sich danach wieder anmelden.`}</p>${objsTxt}`,
+        fn: async () => {
+          const withObjs = $("#archObjs") ? $("#archObjs").checked : false;
+          if (x.user) await api("setUser", { email: x.email, status: on ? "archiviert" : "freigegeben" });
+          if (withObjs || !x.user) for (const o of x.objs) if (!!o.archived !== on) await api("archiveObject", { objectId: o.id, archive: on });
+          closeSheet(); toast(on ? "Archiviert" : "Wiederhergestellt"); refreshRemote.at = 0; back(); } });
+    }
     if (a === "del") return x.user
-      ? deleteUserSheet(x.email, nm, `Er kann sich nicht mehr anmelden und sieht ${x.objs.length === 1 ? "das Objekt" : "die Objekte"} nicht mehr. Seine Angaben, Fotos und Unterlagen bleiben im Objekt erhalten.`, back)
+      ? deleteUserSheet(x.email, nm, `Er kann sich nicht mehr anmelden und sieht ${x.objs.length === 1 ? "das Objekt" : "die Objekte"} nicht mehr. Seine Angaben, Fotos und Unterlagen bleiben im Objekt erhalten. Tipp: „Archivieren“ beendet den Zugang ebenfalls, lässt sich aber rückgängig machen.`, back)
       : controlSheet({ title: "Einladung zurückziehen?", danger: true, label: "Zurückziehen",
           html: `<p style="margin:0">Der Einladungslink für <b>${esc(x.email)}</b> wird ungültig und die Zuordnung zum Objekt entfernt. Das Objekt bleibt erhalten.</p>`,
           fn: async () => { await api("deleteUser", { email: x.email }); closeSheet(); toast("Einladung zurückgezogen"); back(); } });
   };
 }
+function archiveSheet(o, on, back) {
+  controlSheet({ title: on ? "Objektaufnahme archivieren?" : "Aus dem Archiv holen?", label: on ? "Archivieren" : "Zurückholen",
+    html: `<p style="margin:0">${on ? `<b>${esc(o.title || "Ohne Bezeichnung")}</b> verschwindet für Kollegen${o.kunde ? " und den Eigentümer" : ""} aus der Liste und von den Geräten. Alle Daten, Fotos und Unterlagen bleiben erhalten; der Drive-Ordner wandert in den Unterordner „Archiv“. Sie können das Objekt jederzeit zurückholen.` : `<b>${esc(o.title || "")}</b> ist danach wieder für alle Berechtigten sichtbar und der Drive-Ordner liegt wieder bei den aktiven Objekten.`}</p>`,
+    fn: async () => { await api("archiveObject", { objectId: o.id, archive: on }); if (on) { try { await removeLocal(o.id); } catch (e) {} } closeSheet(); toast(on ? "Archiviert" : "Zurückgeholt"); refreshRemote.at = 0; back(); } });
+}
 function adminAccess(objs, users) {
   const ok = users.filter(u => u.status === "freigegeben");
-  $("#adm").innerHTML = `<div class="admhint">Alle Objektaufnahmen: festlegen, welche Kollegen ein Objekt sehen, oder Objekte löschen.</div>` + (objs.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b></div>
+  const act = objs.filter(o => !o.archived), arc = objs.filter(o => o.archived);
+  const card = o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b>${o.archived ? `<span class="chip new">archiviert ${esc(fmtDate(o.archived))}</span>` : ""}</div>
     <div class="meta">angelegt von ${esc(o.creator)}<br>zuletzt geändert ${esc(fmtTime(o.updated))}${o.kunde ? `<br>Eigentümer: ${esc(o.kunde)} (${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"})` : ""}</div>
-    <div class="sublbl">Zugriff für Kollegen</div>
+    ${o.archived ? "" : `<div class="sublbl">Zugriff für Kollegen</div>
     <div class="emails">${o.access.map(m => `<span>${esc(m)}<button type="button" aria-label="Zugriff entfernen" data-rm="${esc(o.id)}" data-m="${esc(m)}">×</button></span>`).join("") || `<span style="color:var(--muted)">nur Ersteller und Admins</span>`}</div>
-    <select class="admsel" data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Kollegen hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select>
-    <div class="btns"><button type="button" class="btn small danger" data-odel="${esc(o.id)}">Objektaufnahme löschen</button></div></div>`).join("") || `<div class="empty">Noch keine Objekte auf dem Server.</div>`);
-  const save = async (o, list) => { await api("setAccess", { objectId: o.id, emails: list }); closeSheet(); toast("Zugriff gespeichert"); renderAdmin("objekte"); };
+    <select class="admsel" data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Kollegen hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select>`}
+    <div class="btns">${o.archived ? `<button type="button" class="btn small primary" data-unarch="${esc(o.id)}">Zurückholen</button>` : `<button type="button" class="btn small" data-arch="${esc(o.id)}">Archivieren</button>`}<button type="button" class="btn small danger" data-odel="${esc(o.id)}">Objektaufnahme löschen</button></div></div>`;
+  $("#adm").innerHTML = `<div class="admhint">Aktive Objektaufnahmen: Zugriff für Kollegen festlegen, archivieren oder löschen. Archivierte Objekte stehen unten.</div>` +
+    (act.map(card).join("") || `<div class="empty">Keine aktiven Objekte.</div>`) +
+    (arc.length ? `${archToggle("Archiv", arc.length)}<div class="list">${arc.map(card).join("")}</div></details>` : "");
+  const back = () => renderAdmin("objekte");
+  const save = async (o, list) => { await api("setAccess", { objectId: o.id, emails: list }); closeSheet(); toast("Zugriff gespeichert"); back(); };
   $("#adm").onclick = e => {
+    const ar = e.target.closest("[data-arch],[data-unarch]"); if (ar) { const o = objs.find(x => x.id === (ar.dataset.arch || ar.dataset.unarch)); return archiveSheet(o, !!ar.dataset.arch, back); }
     const od = e.target.closest("[data-odel]"); if (od) { const o = objs.find(x => x.id === od.dataset.odel); return adminDelete(o.id, o.title || "Ohne Bezeichnung"); }
     const b = e.target.closest("[data-rm]"); if (!b) return; const o = objs.find(x => x.id === b.dataset.rm);
     controlSheet({ title: "Zugriff entfernen?", danger: true, label: "Entfernen", html: `<p style="margin:0"><b>${esc(b.dataset.m)}</b> sieht <b>${esc(o.title || "")}</b> danach nicht mehr.</p>`, fn: () => save(o, o.access.filter(m => m !== b.dataset.m)) });

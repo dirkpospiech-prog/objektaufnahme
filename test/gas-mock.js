@@ -49,6 +49,7 @@ class File {
 class Folder {
   constructor(name, parent) { this.id = nid("d"); this.name = name; this.parent = parent; folders[this.id] = this; }
   getId() { return this.id; } getName() { return this.name; } getUrl() { return "https://drive/folders/" + this.id; } setTrashed(t) { this.trashed = t; return this; }
+  moveTo(f) { this.parent = f.id; return this; }
   createFolder(n) { return new Folder(n, this.id); }
   getFoldersByName(n) { return iter(Object.values(folders).filter(f => f.parent === this.id && f.name === n)); }
   getFilesByName(n) { return iter(Object.values(files).filter(f => f instanceof File && f.parents.includes(this.id) && f.name === n)); }
