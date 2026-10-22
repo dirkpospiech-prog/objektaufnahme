@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -102,7 +102,7 @@ function filled(f, d) {
   if (Array.isArray(v)) return v.length > 0;
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
-const countable = f => !["h", "hint"].includes(f.t);
+const countable = f => !["h", "hint", "stdall"].includes(f.t);
 const vis = (x, d) => !x.when || x.when(d);
 const optsOf = (f, d) => f.opts ? f.opts(d) : f.o;
 const visSections = d => SECTIONS.map((s, i) => i).filter(i => vis(SECTIONS[i], d));
@@ -271,7 +271,7 @@ async function loadServerObject(id) {
   const all = await store.photosOf(id); o.photoCount = all.length; o.pendingPhotos = all.some(p => !p.fileId);
   await store.put("objects", o);
 }
-async function openObject(id, sec = 0, refreshOnly = false) {
+async function openObject(id, sec = "O", refreshOnly = false) {
   cur = await store.get("objects", id); if (!cur) return renderHome(false);
   curPhotos = (await store.photosOf(id)).sort((a, b) => (a.taken || "").localeCompare(b.taken || ""));
   view = "obj"; secIdx = sec;
@@ -283,7 +283,7 @@ async function openObject(id, sec = 0, refreshOnly = false) {
 /* ---------------- Objekt-Ansicht ---------------- */
 function renderObj() {
   const d = cur.data; const [c, t] = syncState(cur);
-  const tabs = SECTIONS.map((s, i) => !vis(s, d) ? "" : `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
+  const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + SECTIONS.map((s, i) => !vis(s, d) ? "" : `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
     + `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`;
   $("#app").innerHTML = `
   <header class="top"><div class="wrap">
@@ -300,14 +300,30 @@ function renderObj() {
 function renderSection() {
   const m = $("#main");
   if (secIdx === "F") { m.innerHTML = photosHTML(); bindPhotos(); return; }
+  if (secIdx === "O") { m.innerHTML = overviewHTML(); return; }
   const d = cur.data, list = visSections(d);
   if (!list.includes(secIdx)) secIdx = list.find(i => i > secIdx) ?? list[list.length - 1];
   const s = SECTIONS[secIdx], pos = list.indexOf(secIdx), prev = list[pos - 1], next = list[pos + 1];
   const hint = !known(d) && s.id !== "s3" ? `<div class="msg info">Tipp: Erst in Abschnitt 3 die <b>Objektart</b> wählen – dann blendet die App alles aus, was für dieses Objekt nicht gebraucht wird.</div>` : "";
   m.innerHTML = `<section class="sec"><div class="sec-head"><span class="num">${s.n}</span><h2>${esc(s.t)}</h2></div>${hint}
     <div class="grp">${s.f.filter(f => vis(f, d)).map(f => fieldHTML(f, d)).join("")}</div></section>
-    <div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SECTIONS[prev].t)}</button>` : "<span></span>"}
+    <div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SECTIONS[prev].t)}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
     ${next !== undefined ? `<button class="btn primary" data-go="${next}">${esc(SECTIONS[next].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`;
+}
+/* Objekt-Übersicht: alle Abschnitte nach Arbeitsschritten, mit Fortschritt */
+function overviewHTML() {
+  const d = cur.data, [c, t] = syncState(cur), pend = curPhotos.filter(p => !p.fileId).length;
+  const row = id => {
+    if (id === "F") return `<button class="ov-row" data-sec="F"><span class="ov-n">${ICON.cam}</span><span class="ov-t">Fotos</span><span class="ov-p">${curPhotos.length}${pend ? ` · ${pend} neu` : ""}</span></button>`;
+    const i = SECTIONS.findIndex(x => x.id === id), s = SECTIONS[i]; if (!vis(s, d)) return "";
+    const p = secProgress(s, d);
+    return `<button class="ov-row" data-sec="${i}"><span class="ov-n">${s.n}</span><span class="ov-t">${esc(s.t)}</span><span class="ov-p${p === 100 ? " done" : ""}">${p === 100 ? "✓" : p + " %"}</span><span class="ov-bar"><i style="width:${p}%"></i></span></button>`;
+  };
+  return `<section class="sec">
+    ${!known(d) ? `<div class="msg info">Zuerst die <b>Objektart</b> wählen – dann zeigt die App nur noch die passenden Fragen. <button type="button" class="btn small" data-sec="2" style="margin-top:8px">Objektart wählen</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
+    ${PHASES.map(ph => `<div class="ov-group"><h3>${esc(ph.t)}</h3>${ph.s.map(row).join("")}</div>`).join("")}
+    <div class="ov-sync"><span class="chip ${c}">${esc(t)}</span><button type="button" class="btn primary" id="sync2">${ICON.sync}Jetzt abgleichen</button></div>
+    <p class="foot">Alle Eingaben werden sofort auf diesem Gerät gespeichert. „Abgleichen“ überträgt sie ins Büro.</p></section>`;
 }
 function pills(id, opts, val, multi) {
   return `<div class="pills" role="group">${opts.map(o => { const on = multi ? (val || []).includes(o) : val === o;
@@ -322,8 +338,9 @@ function fieldHTML(f, d) {
     case "area": return `<label class="fld full"><span>${esc(f.l)}</span><textarea id="f_${f.id}" data-k="${f.id}">${esc(v)}</textarea></label>`;
     case "single": case "multi": return `<div class="fld full"><span>${esc(f.l)}</span>${pills(f.id, optsOf(f, d), v, f.t === "multi")}</div>`;
     case "yn": { const y = v || {};
-      return `<div class="yn"><div class="q">${esc(f.l)}</div><div class="row"><div class="seg" role="group" aria-label="${esc(f.l)}">${[["Ja", "y"], ["Nein", "n"], ["unbek.", "u"]].map(([l, c]) => `<button type="button" class="${c}" aria-pressed="${y.v === l}" data-yn="${f.id}" data-v="${l}">${l}</button>`).join("")}</div>
+      return `<div class="yn"><div class="q">${esc(f.l)}</div><div class="row"><div class="seg" role="group" aria-label="${esc(f.l)}">${[["Ja", f.good ? "n" : "y"], ["Nein", f.good ? "y" : "n"], ["unbek.", "u"]].map(([l, c]) => `<button type="button" class="${c}" aria-pressed="${y.v === l}" data-yn="${f.id}" data-v="${l}">${l}</button>`).join("")}</div>
         <input type="text" id="f_${f.id}_n" data-ynote="${f.id}" value="${esc(y.n)}" placeholder="Erläuterung" aria-label="Erläuterung ${esc(f.l)}"></div></div>`; }
+    case "stdall": return `<div class="fld full stdall"><span>${esc(f.l)}</span><div class="pills">${[1, 2, 3, 4, 5].map(n => `<button type="button" class="pill" data-stdall="${n}">Stufe ${n}</button>`).join("")}</div></div>`;
     case "std": { const st = v || {}; const lv = st.lv || []; const L = ["1 sehr einfach", "2 einfach", "3 mittel", "4 gehoben", "5 stark gehoben"];
       return `<div class="std"><h3>${esc(f.l)}</h3>${f.o.map((t, i) => `<button type="button" class="lv" aria-pressed="${lv.includes(i + 1)}" data-std="${f.id}" data-v="${i + 1}"><span class="bx"></span><b>${L[i]}</b><span class="d">${esc(t)}</span></button>`).join("")}
         <div class="note"><input type="text" id="f_${f.id}_n" data-stdnote="${f.id}" value="${esc(st.n)}" placeholder="Bemerkung (z. B. Fenster EG neu, OG alt)" aria-label="Bemerkung ${esc(f.l)}"></div></div>`; }
@@ -349,8 +366,15 @@ function touch() {
   clearTimeout(saveT); saveT = setTimeout(() => store.put("objects", cur).catch(() => toast("Speichern auf dem Gerät fehlgeschlagen")), 300);
   const chip = $("#syncChip"); if (chip && cur.version) { chip.className = "chip warn"; chip.textContent = "Änderungen nicht abgeglichen"; }
   const t = $("#objTitle"); if (t) t.textContent = objTitle(cur);
-  document.querySelectorAll("#secnav [data-sec]").forEach(b => { if (b.dataset.sec === "F") return; const p = b.querySelector(".p"); if (p) p.textContent = secProgress(SECTIONS[+b.dataset.sec], cur.data) + "%"; });
+  document.querySelectorAll("#secnav [data-sec]").forEach(b => { if (!/^\d+$/.test(b.dataset.sec)) return; const p = b.querySelector(".p"); if (p) p.textContent = secProgress(SECTIONS[+b.dataset.sec], cur.data) + "%"; });
 }
+document.addEventListener("change", e => {
+  if (view === "obj" && e.target.dataset && e.target.dataset.k && DEPENDS.has(e.target.dataset.k) && e.target.tagName === "INPUT") rerenderKeepScroll();
+  if (view === "obj" && e.target.dataset && e.target.dataset.pcat) {
+    const p = curPhotos.find(x => x.id === e.target.dataset.pcat); if (!p) return;
+    p.cat = e.target.value; store.put("photos", cleanPhoto(p)); cur.dirty = true; touch(); rerenderKeepScroll();
+  }
+});
 document.addEventListener("input", e => {
   if (view !== "obj") return;
   const el = e.target, d = cur.data, ds = el.dataset;
@@ -377,9 +401,9 @@ document.addEventListener("click", async e => {
   if (view !== "obj" || !cur) return;
   const d = cur.data;
   if (b.id === "home") { clearTimeout(saveT); await store.put("objects", cur); return history.back(); }
-  if (b.id === "sync") return syncNow();
+  if (b.id === "sync" || b.id === "sync2") return syncNow();
   if (b.id === "menu") return objMenu();
-  if (ds.sec !== undefined || ds.go !== undefined) { const v = ds.sec ?? ds.go; secIdx = v === "F" ? "F" : +v; renderObj(); window.scrollTo(0, 0); return; }
+  if (ds.sec !== undefined || ds.go !== undefined) { const v = ds.sec ?? ds.go; secIdx = v === "F" || v === "O" ? v : +v; renderObj(); window.scrollTo(0, 0); return; }
   if (ds.k && ds.v !== undefined) {
     let val;
     if (ds.k.startsWith("mod:") || ds.k.startsWith("doc:")) {
@@ -392,11 +416,16 @@ document.addEventListener("click", async e => {
     return touch();
   }
   if (ds.yn) { const y = d[ds.yn] || {}; y.v = y.v === ds.v ? "" : ds.v; d[ds.yn] = y; if (DEPENDS.has(ds.yn)) { touch(); return rerenderKeepScroll(); } b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.v === y.v)); return touch(); }
+  if (ds.stdall) {
+    const n = +ds.stdall; let k = 0;
+    SECTIONS.forEach(sec => sec.f.forEach(f => { if (f.t === "std" && vis(f, d) && !((d[f.id] || {}).lv || []).length) { d[f.id] = { ...(d[f.id] || {}), lv: [n] }; k++; } }));
+    touch(); rerenderKeepScroll(); return toast(k ? `Stufe ${n} für ${k} Bauteil(e) übernommen` : "Alle Bauteile sind bereits eingestuft");
+  }
   if (ds.std) { const st = d[ds.std] || {}; const lv = new Set(st.lv || []); const n = +ds.v; lv.has(n) ? lv.delete(n) : lv.add(n); st.lv = [...lv].sort(); d[ds.std] = st; b.setAttribute("aria-pressed", lv.has(n)); return touch(); }
   if (ds.gadd) { const a = Array.isArray(d[ds.gadd]) && d[ds.gadd].length ? d[ds.gadd] : [{}]; a.push({}); d[ds.gadd] = a; touch(); return renderSection(); }
   if (ds.gdel) { const a = d[ds.gdel] || []; a.splice(+ds.r, 1); d[ds.gdel] = a; touch(); return renderSection(); }
   if (ds.cat) { photoCat = ds.cat; return renderSection(); }
-  if (ds.delph) return confirmSheet("Foto löschen?", ds.onServer === "1" ? "Das Foto wird nur auf diesem Gerät entfernt. Auf dem Server bleibt es erhalten." : "Das Foto ist noch nicht auf dem Server und geht damit endgültig verloren.", "Foto löschen", () => deletePhoto(ds.delph));
+  if (ds.delph) return confirmSheet("Foto löschen?", ds.onServer === "1" ? "Das Foto wird aus der Aufnahme entfernt (wirksam nach dem nächsten Abgleich). Die Bilddatei bleibt zur Sicherheit im Drive-Ordner „Fotos“." : "Das Foto ist noch nicht auf dem Server und geht damit endgültig verloren.", "Foto löschen", () => deletePhoto(ds.delph));
   if (ds.full) return showPhoto(ds.full);
 });
 
@@ -415,6 +444,7 @@ function photosHTML() {
     ${groups.length ? groups.map(([c, a]) => `<div class="catgroup"><h3>${esc(c)} (${a.length})</h3><div class="photogrid">${a.map(p => `
       <div class="ph"><button type="button" class="img" data-thumb="${p.id}" data-full="${p.id}" style="border:0;padding:0" aria-label="Foto vergrößern">${p.blob || p.thumb ? "" : "Vorschau laden"}</button><div class="body">
         <input type="text" id="cap_${p.id}" data-cap="${p.id}" value="${esc(p.caption)}" placeholder="Beschriftung" aria-label="Beschriftung">
+        <select data-pcat="${p.id}" aria-label="Kategorie ändern">${PHOTO_CATS.map(c => `<option${c === p.cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>
         <div class="acts"><span>${p.fileId ? "✓ auf dem Server" : "nicht abgeglichen"}${p.by && p.by !== session.user.email ? " · " + esc(p.by.split("@")[0]) : ""}</span><button type="button" data-delph="${p.id}" data-on-server="${p.fileId ? 1 : 0}">Löschen</button></div></div></div>`).join("")}</div></div>`).join("")
       : `<div class="empty">Noch keine Fotos. Kategorie wählen und „Foto aufnehmen“ tippen.</div>`}</section>`;
 }

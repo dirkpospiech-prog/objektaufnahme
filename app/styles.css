@@ -149,6 +149,22 @@ input:focus, textarea:focus, select:focus { border-color: var(--brand); outline:
 .secfoot { display: flex; gap: 10px; justify-content: space-between; padding-block: 8px 40px; }
 .secfoot .btn { flex: 1; }
 
+/* Objekt-Übersicht */
+.ov-meta { color: var(--muted); }
+.ov-meta b { color: var(--ink-strong); }
+.ov-group { display: flex; flex-direction: column; gap: 6px; }
+.ov-group h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: var(--brand); margin-top: 8px; }
+.ov-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line); padding: 12px 14px; color: var(--ink-strong); font-size: 16px; }
+.ov-n { font-weight: 700; color: var(--brand); display: flex; align-items: center; }
+.ov-t { min-width: 0; }
+.ov-p { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ov-p.done { color: var(--ok); font-weight: 700; font-size: 16px; }
+.ov-bar { grid-column: 2 / -1; height: 3px; background: var(--line); }
+.ov-bar > i { display: block; height: 100%; background: var(--brand); }
+.ov-sync { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
+.stdall { background: var(--brand-soft); padding: 12px; }
+.ph select { font-size: 13px; min-height: 36px; padding: 4px 8px; }
+
 /* Fotos */
 .photogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .ph { background: var(--card); border: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
