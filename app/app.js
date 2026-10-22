@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const LS = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
@@ -105,6 +105,7 @@ function applyCascade(d) {
 const secProgress = (s, d) => { const fs = s.f.filter(f => countable(f) && vis(f, d)); return fs.length ? Math.round(100 * fs.filter(f => filled(f, d)).length / fs.length) : 100; };
 function totalProgress(o) { const d = o.data || {}; let a = 0, b = 0; SECTIONS.filter(s => vis(s, d)).forEach(s => s.f.filter(f => countable(f) && vis(f, d)).forEach(f => { b++; if (filled(f, d)) a++; })); return b ? Math.round(100 * a / b) : 0; }
 function syncState(o) {
+  if (o.serverNewer && o.serverNewer > (o.version || 0)) return ["warn", "Neuere Fassung auf dem Server – bitte abgleichen"];
   if (!o.version) return ["new", "Noch nicht auf dem Server"];
   if (o.dirty || o.pendingPhotos) return ["warn", "Änderungen nicht abgeglichen"];
   return ["ok", "Abgeglichen " + fmtTime(o.lastSync)];
@@ -191,7 +192,7 @@ async function renderHome(push = true) {
     <div class="home-head"><div class="eyebrow">Angemeldet als ${esc(u.name)}</div><h2>Objektaufnahmen</h2></div>
     ${STORAGE_OK ? "" : `<div class="msg warn">Dieses Gerät erlaubt kein dauerhaftes Speichern. Bitte nach jeder Aufnahme sofort abgleichen.</div>`}
     ${navigator.onLine ? "" : `<div class="msg info">Offline. Sie können normal weiterarbeiten – alles bleibt auf dem Gerät.</div>`}
-    <div class="actions"><button class="btn primary" id="newObj">${ICON.plus}Neue Aufnahme</button><button class="btn" id="refresh">${ICON.cloud}Vom Server laden</button></div>
+    <div class="actions"><button class="btn primary" id="newObj">${ICON.plus}Neue Aufnahme</button><button class="btn" id="refresh">${ICON.sync}Aktualisieren</button></div>
     <div id="homeMsg"></div>
     <div class="list">
       ${objects.map(card).join("")}
@@ -200,11 +201,42 @@ async function renderHome(push = true) {
     </div>
     <div class="foot">Version ${APP_VERSION}</div>
   </main>`;
-  if (navigator.onLine && !renderHome.loaded) { renderHome.loaded = true; refreshRemote(true); }
+  if (navigator.onLine && Date.now() - (refreshRemote.at || 0) > 15000) refreshRemote(true);
 }
+/* Holt die Objektliste vom Server und bringt das Gerät auf den neuesten Stand:
+   neue Objekte werden geladen, neuere Fassungen übernommen – außer es gibt hier
+   noch nicht abgeglichene Änderungen (dann Hinweis, Entscheidung beim Abgleichen). */
 async function refreshRemote(silent) {
-  try { const r = await api("listObjects"); remote = r.objects || []; if (view === "home") renderHome(false); if (!silent) toast(remote.length + " Objekte auf dem Server"); }
-  catch (e) { if (!silent && $("#homeMsg")) $("#homeMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  if (refreshRemote.busy) return; refreshRemote.busy = true; refreshRemote.at = Date.now();
+  let loaded = 0;
+  try {
+    const r = await api("listObjects"); remote = r.objects || [];
+    const removed = removedIds();
+    for (const ro of remote) {
+      const lo = await store.get("objects", ro.id);
+      if (!lo && removed.includes(ro.id)) continue;
+      if (lo && (lo.version || 0) >= ro.version) { if (lo.serverNewer) { lo.serverNewer = 0; await store.put("objects", lo); } continue; }
+      if (lo && (lo.dirty || lo.pendingPhotos)) { if (lo.serverNewer !== ro.version) { lo.serverNewer = ro.version; await store.put("objects", lo); } continue; }
+      if (cur && cur.id === ro.id) continue;      // gerade geöffnet: dort prüfen
+      try { await loadServerObject(ro.id); loaded++; } catch (e) { /* einzelnes Objekt später erneut */ }
+    }
+    if (view === "home") renderHome(false);
+    if (!silent) toast(loaded ? loaded + " Aufnahme(n) aktualisiert" : "Alles auf dem neuesten Stand");
+  } catch (e) { if (!silent && $("#homeMsg")) $("#homeMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  finally { refreshRemote.busy = false; }
+}
+const removedIds = () => { try { return JSON.parse(LS.get("removedIds") || "[]"); } catch (e) { return []; } };
+/* Beim Öffnen eines Objekts: gibt es auf dem Server eine neuere Fassung? */
+async function checkServerVersion() {
+  if (!navigator.onLine || !cur || !cur.version) return;
+  const id = cur.id;
+  try {
+    const r = await api("listObjects"); const ro = (r.objects || []).find(x => x.id === id);
+    if (!ro || !cur || cur.id !== id || ro.version <= (cur.version || 0)) return;
+    if (cur.dirty || cur.pendingPhotos) { cur.serverNewer = ro.version; await store.put("objects", cur); toast("Auf dem Server gibt es eine neuere Fassung. Beim Abgleichen wählen Sie, welche gilt."); if (view === "obj") rerenderKeepScroll(); return; }
+    await loadServerObject(id);
+    if (view === "obj" && cur && cur.id === id) { const keep = secIdx; await openObject(id, keep, true); toast("Neueste Fassung vom Server geladen"); }
+  } catch (e) { /* offline o. Ä.: später */ }
 }
 async function newObject() {
   const o = { id: uid(), created: new Date().toISOString(), updated: new Date().toISOString(), data: { ot_datum: today(), stichtag_art: "aktuell (Ortstermin)" }, photoCount: 0, dirty: true, version: 0, creator: session.user.email };
@@ -212,7 +244,7 @@ async function newObject() {
 }
 async function fetchObject(id) {
   sheet(`<h2>Objekt laden</h2><div class="log" id="slog"><div>Wird vom Server geladen …</div></div><button class="btn" data-close>Schließen</button>`);
-  try { await loadServerObject(id); closeSheet(); openObject(id); }
+  try { LS.set("removedIds", JSON.stringify(removedIds().filter(x => x !== id))); await loadServerObject(id); closeSheet(); openObject(id); }
   catch (e) { $("#slog").innerHTML = `<div class="e">${esc(e.message)}</div>`; }
 }
 async function loadServerObject(id) {
@@ -220,15 +252,17 @@ async function loadServerObject(id) {
   const local = await store.get("objects", id);
   const localPh = local ? await store.photosOf(id) : [];
   for (const p of s.photos || []) { const lp = localPh.find(x => x.id === p.id); await store.put("photos", { ...p, obj: id, blob: lp ? lp.blob : null, thumb: lp ? lp.thumb : null }); }
-  for (const lp of localPh) if (!lp.fileId && !(s.photos || []).some(p => p.id === lp.id)) { /* lokal neu, behalten */ }
-  const o = { id, created: s.created, updated: s.updated, data: s.data || {}, title: s.title, version: s.version, folderUrl: r.object.folderUrl, creator: s.creator, dirty: false, lastSync: new Date().toISOString() };
+  const o = { id, created: s.created, updated: s.updated, data: s.data || {}, title: s.title, version: s.version, folderUrl: r.object.folderUrl, creator: s.creator, dirty: false, serverNewer: 0, lastSync: new Date().toISOString() };
   const all = await store.photosOf(id); o.photoCount = all.length; o.pendingPhotos = all.some(p => !p.fileId);
   await store.put("objects", o);
 }
-async function openObject(id, sec = 0) {
+async function openObject(id, sec = 0, refreshOnly = false) {
   cur = await store.get("objects", id); if (!cur) return renderHome(false);
   curPhotos = (await store.photosOf(id)).sort((a, b) => (a.taken || "").localeCompare(b.taken || ""));
-  view = "obj"; secIdx = sec; renderObj(); window.scrollTo(0, 0); go("obj");
+  view = "obj"; secIdx = sec;
+  if (refreshOnly) return rerenderKeepScroll();
+  renderObj(); window.scrollTo(0, 0); go("obj");
+  checkServerVersion();
 }
 
 /* ---------------- Objekt-Ansicht ---------------- */
@@ -436,7 +470,8 @@ function objMenu() {
     if (cur.dirty) confirmSheet("Lokale Änderungen verwerfen?", "Auf diesem Gerät gibt es Änderungen, die noch nicht auf dem Server sind. Sie gehen verloren.", "Laden", doIt); else doIt();
   };
   $("#delObj").onclick = () => confirmSheet("Aufnahme entfernen?", (cur.dirty || cur.pendingPhotos) ? "Achtung: Änderungen oder Fotos sind noch nicht auf dem Server und gehen verloren." : "Die Aufnahme wird nur von diesem Gerät entfernt. Auf dem Server bleibt alles erhalten.", "Entfernen", async () => {
-    for (const p of curPhotos) await store.del("photos", p.id); await store.del("objects", cur.id); renderHome(false);
+    for (const p of curPhotos) await store.del("photos", p.id); await store.del("objects", cur.id);
+    LS.set("removedIds", JSON.stringify([...new Set([...removedIds(), cur.id])])); cur = null; renderHome(false);
   });
 }
 function accountSheet() {
@@ -452,7 +487,7 @@ function accountSheet() {
     catch (e) { $("#pwMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; } };
   $("#logout").onclick = async () => {
     const pending = (await store.all("objects")).some(o => o.dirty || o.pendingPhotos);
-    const out = async () => { try { await api("logout"); } catch (e) {} saveSession(null); remote = []; renderHome.loaded = false; closeSheet(); renderAuth(); };
+    const out = async () => { try { await api("logout"); } catch (e) {} saveSession(null); remote = []; refreshRemote.at = 0; closeSheet(); renderAuth(); };
     if (pending) confirmSheet("Trotzdem abmelden?", "Es gibt Aufnahmen, die noch nicht abgeglichen sind. Sie bleiben auf dem Gerät und können nach der nächsten Anmeldung abgeglichen werden.", "Abmelden", out); else out();
   };
 }
@@ -505,7 +540,7 @@ async function syncNow(force = false) {
     }
     cur.pendingPhotos = curPhotos.some(p => !p.fileId);
     if (todo.length || curPhotos.some(p => p.fileId)) await saveRemote(true);
-    cur.dirty = false; cur.lastSync = new Date().toISOString(); await store.put("objects", cur); bar(100);
+    cur.dirty = false; cur.serverNewer = 0; cur.lastSync = new Date().toISOString(); await store.put("objects", cur); bar(100);
     slog("Abgleich abgeschlossen. Daten, Fotos und Protokoll liegen im Büro-Drive.", "o");
   } catch (e) {
     if (e.code === "conflict") {
@@ -570,7 +605,8 @@ function adminAccess(objs, users) {
 (async () => {
   DB = await openDB(); if (!DB) STORAGE_OK = false;
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
-  window.addEventListener("online", () => { if (view === "home") renderHome(false); });
+  window.addEventListener("online", () => { if (view === "home") renderHome(false); else if (view === "obj") checkServerVersion(); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState !== "visible" || !session) return; if (view === "home") refreshRemote(true); else if (view === "obj") checkServerVersion(); });
   window.addEventListener("offline", () => { if (view === "home") renderHome(false); });
   try { history.replaceState({ v: "root" }, ""); } catch (e) {}
   if (session && session.token) renderHome(false); else renderAuth();
