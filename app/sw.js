@@ -1,5 +1,5 @@
 /* Offline-Cache für die Web-Version (in der Android-App liegen die Dateien ohnehin auf dem Gerät). */
-const CACHE = "objektaufnahme-v1.0.0";
+const CACHE = "objektaufnahme-v1.0.1";
 const FILES = ["./", "index.html", "styles.css", "app.js", "schema.js", "config.js", "logo.png", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png",
   "fonts/dm-sans-latin-400-normal.woff2", "fonts/dm-sans-latin-500-normal.woff2", "fonts/dm-sans-latin-600-normal.woff2",
@@ -10,5 +10,5 @@ self.addEventListener("fetch", e => {
   const u = new URL(e.request.url);
   if (e.request.method !== "GET" || u.origin !== location.origin) return;
   // Netz zuerst (damit Updates sofort ankommen), sonst Cache
-  e.respondWith(fetch(e.request).then(r => { const c = r.clone(); caches.open(CACHE).then(x => x.put(e.request, c)); return r; }).catch(() => caches.match(e.request).then(r => r || caches.match("index.html"))));
+  e.respondWith(fetch(e.request, { cache: "no-cache" }).then(r => { const c = r.clone(); caches.open(CACHE).then(x => x.put(e.request, c)); return r; }).catch(() => caches.match(e.request).then(r => r || caches.match("index.html"))));
 });
