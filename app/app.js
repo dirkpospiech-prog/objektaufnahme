@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -369,6 +369,7 @@ document.addEventListener("click", async e => {
   if (b.id === "newObj") return newObject();
   if (b.id === "refresh") return refreshRemote(false);
   if (b.id === "getUpdate") { window.location.href = APK_URL; return; }
+  if (b.id === "camBtn") return takeNativePhoto();
   if (b.id === "toAdmin") return renderAdmin("users", true);
   if (b.id === "toAccount") return accountSheet();
   if (ds.open) return openObject(ds.open);
@@ -408,7 +409,7 @@ function photosHTML() {
   return `<section class="sec"><div class="sec-head"><span class="num">F</span><h2>Fotos</h2></div>
     <div class="fld"><span>Kategorie für neue Fotos</span><div class="pills">${PHOTO_CATS.map(c => `<button type="button" class="pill" aria-pressed="${c === photoCat}" data-cat="${esc(c)}">${esc(c)}</button>`).join("")}</div></div>
     <div class="actions" style="padding:0">
-      <label class="btn primary addph">${ICON.cam}Foto aufnehmen<input type="file" accept="image/*" capture="environment" id="camIn" aria-label="Foto aufnehmen"></label>
+      ${nativeCamera() ? `<button type="button" class="btn primary" id="camBtn">${ICON.cam}Foto aufnehmen</button>` : `<label class="btn primary addph">${ICON.cam}Foto aufnehmen<input type="file" accept="image/*" capture="environment" id="camIn" aria-label="Foto aufnehmen"></label>`}
       <label class="btn addph">${ICON.plus}Aus Galerie<input type="file" accept="image/*" multiple id="galIn" aria-label="Fotos aus Galerie wählen"></label></div>
     <div style="font-size:14px;color:var(--muted)">${curPhotos.length} Fotos · ${pend ? `<b style="color:var(--warn)">${pend} noch nicht auf dem Server</b>` : "alle auf dem Server"}</div>
     ${groups.length ? groups.map(([c, a]) => `<div class="catgroup"><h3>${esc(c)} (${a.length})</h3><div class="photogrid">${a.map(p => `
@@ -440,6 +441,20 @@ async function shrink(file, maxEdge = 2000, q = 0.82) {
   const c = document.createElement("canvas"); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
   c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height); if (bmp.close) bmp.close();
   return await new Promise(r => c.toBlob(r, "image/jpeg", q));
+}
+/* In der Android-App: Kamera direkt über das Kamera-Modul öffnen (nicht über die Galerie) */
+const nativeCamera = () => IS_APP && window.Capacitor.Plugins && window.Capacitor.Plugins.Camera;
+async function takeNativePhoto() {
+  try {
+    const ph = await nativeCamera().getPhoto({ quality: 85, source: "CAMERA", resultType: "uri", saveToGallery: false, correctOrientation: true, width: 2000 });
+    const blob = await fetch(ph.webPath).then(r => r.blob());
+    await addPhotos([blob]);
+  } catch (e) {
+    const m = String((e && e.message) || e);
+    if (/cancel/i.test(m)) return;
+    if (/denied|permission/i.test(m)) return toast("Bitte der App den Zugriff auf die Kamera erlauben (Android-Einstellungen → Apps → Objektaufnahme → Berechtigungen).");
+    toast("Kamera konnte nicht geöffnet werden: " + m);
+  }
 }
 async function addPhotos(files) {
   if (!files || !files.length) return;
