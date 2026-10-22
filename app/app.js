@@ -152,7 +152,7 @@ function renderAuth(tab = "login", note = "") {
         const r = await api("login", { email, password: pw });
         saveSession({ token: r.token, user: r.user }); renderHome();
       }
-    } catch (e) { m.innerHTML = `<div class="msg ${e.code === "pending" ? "info" : "err"}">${esc(e.message)}</div>`; btn.disabled = false; }
+    } catch (e) { const extra = e.code === "wrong_login" && tab === "login" ? " Noch keinen Zugang? Oben auf „Zugang beantragen“ tippen." : ""; m.innerHTML = `<div class="msg ${e.code === "pending" ? "info" : "err"}">${esc(e.message + extra)}</div>`; btn.disabled = false; }
   };
 }
 
