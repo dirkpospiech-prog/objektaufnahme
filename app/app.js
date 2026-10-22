@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -465,7 +465,17 @@ function bindPhotos() {
 }
 function b64ToBlob(b64, mime) { const bin = atob(b64); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new Blob([a], { type: mime || "image/jpeg" }); }
 function blobToB64(blob) { return new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(",")[1]); fr.onerror = () => j(fr.error); fr.readAsDataURL(blob); }); }
-async function shrink(file, maxEdge = 2000, q = 0.82) {
+/* Fotogröße: Standard ca. 150–250 KB (1600 px), hoch ca. 400–600 KB (2000 px) */
+const PHOTO_PRESETS = { standard: { edge: 1600, q: 0.7, max: 300000 }, hoch: { edge: 2000, q: 0.82, max: 700000 } };
+const photoPreset = () => PHOTO_PRESETS[LS.get("photoQuality")] || PHOTO_PRESETS.standard;
+async function compressPhoto(file) {
+  const pr = photoPreset();
+  let b = await shrink(file, pr.edge, pr.q);
+  if (b && b.size > pr.max) b = await shrink(file, pr.edge, pr.q - 0.12);           // sehr detailreiche Motive
+  if (b && b.size > pr.max * 1.4) b = await shrink(file, Math.round(pr.edge * 0.85), pr.q - 0.15);
+  return b;
+}
+async function shrink(file, maxEdge = 1600, q = 0.7) {
   let bmp; try { bmp = await createImageBitmap(file, { imageOrientation: "from-image" }); } catch (e) { bmp = await createImageBitmap(file); }
   const s = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
   const c = document.createElement("canvas"); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
@@ -476,7 +486,7 @@ async function shrink(file, maxEdge = 2000, q = 0.82) {
 const nativeCamera = () => IS_APP && window.Capacitor.Plugins && window.Capacitor.Plugins.Camera;
 async function takeNativePhoto() {
   try {
-    const ph = await nativeCamera().getPhoto({ quality: 85, source: "CAMERA", resultType: "uri", saveToGallery: false, correctOrientation: true, width: 2000 });
+    const ph = await nativeCamera().getPhoto({ quality: 90, source: "CAMERA", resultType: "uri", saveToGallery: false, correctOrientation: true, width: photoPreset().edge });
     const blob = await fetch(ph.webPath).then(r => r.blob());
     await addPhotos([blob]);
   } catch (e) {
@@ -490,7 +500,7 @@ async function addPhotos(files) {
   if (!files || !files.length) return;
   toast(files.length > 1 ? files.length + " Fotos werden gespeichert …" : "Foto wird gespeichert …");
   for (const f of files) {
-    try { const blob = await shrink(f); const p = { id: uid(), obj: cur.id, cat: photoCat, caption: "", taken: new Date().toISOString(), by: session.user.email, blob };
+    try { const blob = await compressPhoto(f); const p = { id: uid(), obj: cur.id, cat: photoCat, caption: "", taken: new Date().toISOString(), by: session.user.email, blob };
       await store.put("photos", p); curPhotos.push(p); }
     catch (e) { toast("Ein Foto konnte nicht gelesen werden."); }
   }
@@ -542,10 +552,15 @@ function accountSheet() {
       <label class="fld"><span>Bisheriges Passwort</span><input type="password" id="pw_old" autocomplete="current-password"></label>
       <label class="fld"><span>Neues Passwort (mind. 8 Zeichen)</span><input type="password" id="pw_new" autocomplete="new-password"></label>
       <div id="pwMsg"></div><button class="btn" type="submit">Passwort ändern</button></form>
+    <div class="fld"><span>Fotogröße</span><div class="pills">
+      <button type="button" class="pill" data-pq="standard" aria-pressed="${!LS.get("photoQuality") || LS.get("photoQuality") === "standard"}">Standard (ca. 200 KB)</button>
+      <button type="button" class="pill" data-pq="hoch" aria-pressed="${LS.get("photoQuality") === "hoch"}">Hohe Qualität (ca. 500 KB)</button></div>
+      <span style="font-weight:400">Gilt für neue Fotos auf diesem Gerät. Standard reicht für Gutachten.</span></div>
     <button class="btn danger" id="logout">Abmelden</button><button class="btn" data-close>Schließen</button>`);
   $("#pwForm").onsubmit = async ev => { ev.preventDefault();
     try { await api("changePassword", { oldPassword: $("#pw_old").value, newPassword: $("#pw_new").value }); $("#pwMsg").innerHTML = `<div class="msg ok">Passwort geändert.</div>`; }
     catch (e) { $("#pwMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; } };
+  document.querySelectorAll("[data-pq]").forEach(b => b.onclick = () => { LS.set("photoQuality", b.dataset.pq); document.querySelectorAll("[data-pq]").forEach(x => x.setAttribute("aria-pressed", x === b)); toast("Fotogröße gespeichert"); });
   $("#logout").onclick = async () => {
     const pending = (await store.all("objects")).some(o => o.dirty || o.pendingPhotos);
     const out = async () => { try { await api("logout"); } catch (e) {} saveSession(null); remote = []; refreshRemote.at = 0; closeSheet(); renderAuth(); };
