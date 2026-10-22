@@ -19,7 +19,7 @@ async def main():
             C = await ctx(link)
             await C.fill("#ia_name","Erika"); await C.fill("#ia_pw","erika1234"); await C.fill("#ia_pw2","erika1234"); await C.click("#iaBtn"); await C.wait_for_timeout(2500)
             await C.click("[data-open]"); await C.wait_for_selector("#secnav")
-            await C.click('#secnav [data-sec="0"]'); await C.click('[data-k="ob_art"][data-v="Einfamilienhaus"]'); await C.fill("#f_k_wfl","142")
+            await C.click('#secnav [data-sec="1"]'); await C.click('[data-k="ob_art"][data-v="Einfamilienhaus"]'); await C.fill("#f_k_wfl","142")
             print("Chip direkt nach Eingabe:", await C.inner_text("#syncChip"))
             await C.wait_for_timeout(7000)
             print("Chip nach 7 s:", await C.inner_text("#syncChip"))
@@ -29,7 +29,7 @@ async def main():
             # zweites Gerät
             D = await ctx("http://127.0.0.1:8702/index.html")
             await D.fill("#a_email","erika@example.com"); await D.fill("#a_pw","erika1234"); await D.click("#authBtn"); await D.wait_for_timeout(3000)
-            await D.click("[data-open]"); await D.wait_for_selector("#secnav"); await D.click('#secnav [data-sec="0"]')
+            await D.click("[data-open]"); await D.wait_for_selector("#secnav"); await D.click('#secnav [data-sec="1"]')
             print("Zweites Gerät sieht Wohnfläche:", await D.input_value("#f_k_wfl"))
             print("Fehler:", errs); await br.close()
     finally: mock.terminate(); web.terminate()

@@ -255,9 +255,15 @@ const PHASES = [
 const RATE = (id, l, ex, words) => ({ t: "rate", id, l, o: (words || ["Sehr hochwertig", "Hochwertig", "Durchschnittlich", "Einfach", "Sehr einfach"]).map((w, i) => [w, ex[i]]) });
 const GOOD = ["Sehr gut", "Gut", "Durchschnittlich", "Schlecht", "Sehr schlecht"];
 const KSECTIONS = [
- { id: "k1", n: "1", t: "Ihr Objekt", f: [
+ { id: "k0", n: "1", t: "Über Sie", f: [
   { t: "hint", l: "Bitte füllen Sie aus, was Sie wissen. Felder, die Sie nicht kennen, lassen Sie einfach leer – wir klären das gemeinsam. Je vollständiger Ihre Angaben, desto genauer unser Ergebnis." },
-  { t: "single", id: "k_auftrag", l: "Worum geht es?", o: ["Verkauf", "Wertermittlung / Gutachten", "Vermietung / Verpachtung"] },
+  T("k_name", "Name, Vorname", { full: 1 }), T("k_anschrift", "Ihre Anschrift (falls abweichend vom Objekt)", { full: 1 }),
+  T("k_tel", "Telefon", { type: "tel" }), T("k_mail", "E-Mail", { type: "email" }),
+  { t: "single", id: "k_eigentum", l: "Wem gehört die Immobilie?", o: ["mir allein", "Ehepaar / Lebenspartner", "mehreren Personen (Miteigentum / Bruchteil)", "einer Erbengemeinschaft", "einer Firma"] },
+  { t: "single", id: "k_vertretung", l: "Sie handeln als", o: ["Eigentümer/in", "Bevollmächtigte(r) / Vertretung"] },
+  { t: "area", id: "k_eigentuemer", l: "Weitere Eigentümer (Name, Anteil)" },
+  { t: "single", id: "k_auftrag", l: "Worum geht es?", o: ["Verkauf", "Wertermittlung / Gutachten", "Vermietung / Verpachtung"] } ] },
+ { id: "k1", n: "2", t: "Ihre Immobilie", f: [
   { t: "single", id: "ob_art", l: "Um welche Art von Immobilie geht es?", o: ["Einfamilienhaus", "Zweifamilienhaus", "Doppelhaushälfte", "Reihenmittelhaus", "Reihenendhaus", "Mehrfamilienhaus", "Eigentumswohnung", "Wohn- und Geschäftshaus", "Gewerbe / Büro", "Bauland / unbebaut", "Wochenend- / Erholungsgrundstück", "Land- / Forstwirtschaft", "Sonstiges"] },
   T("ob_str", "Straße, Hausnummer", { full: 1 }), T("ob_plz", "PLZ", { num: 1 }), T("ob_ort", "Ort / Ortsteil"),
   T("k_bj", "Baujahr (falls bekannt)", { num: 1 }),
@@ -275,7 +281,7 @@ const KSECTIONS = [
   T("k_park_anz", "Anzahl (z. B. 1 Garage, 2 Stellplätze)", { full: 1 }),
   { t: "multi", id: "k_extra", l: "Was ist vorhanden?", o: ["Balkon / Loggia", "Terrasse", "Garten", "Wintergarten", "Einbauküche", "Kamin / Kachelofen", "Sauna", "Swimmingpool", "Gäste-WC", "Aufzug", "barrierearm", "Nebengebäude / Gartenhaus", "Brunnen"] },
   { t: "area", id: "k_extra_info", l: "Baujahr und ungefähre Herstellungskosten (z. B. Einbauküche 2019, ca. 12.000 €; Pool 2015, ca. 25.000 €)" } ] },
- { id: "k2", n: "2", t: "Zustand & Modernisierung", f: [
+ { id: "k2", n: "3", t: "Zustand & Modernisierung", f: [
   { t: "single", id: "k_sanierung", l: "Welche Beschreibung passt am besten?", o: ["Neubau", "umfassend saniert und instand gesetzt", "teilsaniert und renoviert", "im Zustand des Baujahres"] },
   { t: "single", id: "k_zustand", l: "Wie würden Sie den Zustand beschreiben?", o: ["neu / neuwertig", "gepflegt", "teilweise renoviert", "renovierungsbedürftig", "sanierungsbedürftig"] },
   { t: "hint", l: "Was wurde wann erneuert? Ungefähre Jahre genügen." },
@@ -283,7 +289,7 @@ const KSECTIONS = [
   { t: "multi", id: "k_schad", l: "Sind Schadstoffe bekannt? (soweit bekannt)", o: ["Asbest (z. B. Dach, Fassade, Boden)", "Künstliche Mineralfasern (KMF)", "Holzschutzmittel (z. B. PCP, Lindan)", "Sonstige", "keine bekannt"] },
   { t: "area", id: "k_schad_text", l: "Ergänzung zu Schadstoffen" },
   { t: "area", id: "k_maengel", l: "Gibt es Mängel oder Schäden, die Sie kennen? (z. B. Feuchtigkeit, Risse, undichtes Dach)" } ] },
- { id: "k8", n: "3", t: "Ausstattung & Lage", f: [
+ { id: "k8", n: "4", t: "Ausstattung & Lage", f: [
   { t: "hint", l: "Wählen Sie je Bereich die Beschreibung, die am ehesten passt. Die Beispiele dienen nur zur Orientierung." },
   RATE("k_r_bau", "Mauerwerk & Dach", ["z. B. Massivbau, aufwändige Fassade mit Zierelementen, hochwertige Dachpfannen", "z. B. Massivbau oder Skelettbau mit hochwertiger Fassade (z. B. Vollwärmeschutz)", "z. B. Massivbau, Beton- oder Tondachpfannen, gut verputzt", "z. B. Fertigbau oder Massivbau mit einfachem Putz, Betondachpfannen", "z. B. einfacher Fertigbau oder veralteter Massivbau, Bitumen- oder Asbestdach"]),
   RATE("k_r_daemm", "Dämmung", ["z. B. sehr hochwertige Dämmung von Wänden und Dach", "z. B. zusätzliche Dach- oder Wanddämmung", "z. B. baujahrestypische Dachdämmung, keine zusätzliche Dämmung", "z. B. keine zusätzliche Dämmung, einfach gedämmtes Dach", "z. B. ungedämmtes Dach, dünnes Mauerwerk (unter 36,5 cm)"]),
@@ -298,7 +304,7 @@ const KSECTIONS = [
   RATE("k_r_licht", "Besonnung / Belichtung", ["z. B. sehr helle Räume, große Fensterflächen", "z. B. helle Räume", "z. B. weder besonders hell noch dunkel", "z. B. dunkle Räume", "z. B. sehr dunkle Räume, teils ohne Fenster"], GOOD),
   RATE("k_r_aussicht", "Aussicht", ["z. B. Wald- oder Seeblick", "z. B. Blick ins Grüne oder aus dem Dachgeschoss", "z. B. typisch für Lage und Umgebung", "z. B. auf unattraktive Nachbarbebauung", "z. B. auf Industrie oder Autobahn"], ["Besonders attraktiv", "Attraktiv", "Durchschnittlich", "Unattraktiv", "Besonders unattraktiv"]),
   RATE("k_r_lage", "Lage / Ruhe", ["z. B. am Waldrand oder in Alleinlage", "z. B. Sackgasse oder verkehrsberuhigte Straße", "z. B. entsprechend der Wohnumgebung", "z. B. durch Straßenverkehr belastet", "z. B. starker Verkehr oder Industrie"], ["Besonders ruhig", "Ruhig", "Durchschnittlich", "Belastet", "Besonders belastet"]) ] },
- { id: "k3", n: "4", t: "Heizung, Energie & Anschlüsse", f: [
+ { id: "k3", n: "5", t: "Heizung, Energie & Anschlüsse", f: [
   { t: "multi", id: "energie", l: "Womit wird geheizt?", o: ["Erdgas", "Heizöl", "Flüssiggas", "Wärmepumpe", "Fernwärme", "Pellets / Holz", "Strom (Nachtspeicher)", "Solarthermie", "Sonstiges"] },
   T("k_heiz_bj", "Baujahr der Heizung (ca.)", { num: 1 }), T("k_heiz_typ", "Typ / Fabrikat der Heizung"),
   { t: "single", id: "er_tank", l: "Brennstofftank", o: ["keiner", "oberirdisch / Keller", "Erdtank (auch stillgelegt)"] },
@@ -313,26 +319,20 @@ const KSECTIONS = [
   { t: "single", id: "er_strom", l: "Strom", o: ["angeschlossen", "anliegend", "nicht vorhanden"] },
   { t: "single", id: "er_gas", l: "Gasnetz", o: ["angeschlossen", "anliegend", "nicht vorhanden"] },
   { t: "single", id: "er_internet", l: "Internet", o: ["Glasfaser", "VDSL / Kabel", "langsames DSL / keiner"] } ] },
- { id: "k4", n: "5", t: "Nutzung & Kosten", f: [
+ { id: "k4", n: "6", t: "Nutzung & Kosten", f: [
   { t: "multi", id: "nutzung", l: "Wie wird die Immobilie genutzt?", o: ["eigengenutzt", "teilweise vermietet", "vollständig vermietet", "verpachtet", "leerstehend"] },
   { t: "area", id: "k_mieter", l: "Mietverhältnisse (Wohnung/Einheit, Kaltmiete, seit wann)" },
   T("k_miete", "Ist-Miete gesamt (€/Monat, kalt)", { num: 1 }), T("k_miete_soll", "Soll-Miete / erzielbare Miete (€/Monat, kalt)", { num: 1 }),
   T("k_hausgeld", "Hausgeld (€/Monat)", { num: 1 }), T("k_ruecklage", "davon Rücklage (€/Monat)", { num: 1 }),
   T("k_grundsteuer", "Grundsteuer (€/Jahr)", { num: 1 }), T("k_nk", "Nebenkosten ca. (€/Monat)", { num: 1 }) ] },
- { id: "k5", n: "6", t: "Eigentum & Rechtliches", f: [
-  { t: "h", l: "Ihre Kontaktdaten" },
-  T("k_name", "Name, Vorname", { full: 1 }), T("k_anschrift", "Ihre Anschrift (falls abweichend vom Objekt)", { full: 1 }),
-  T("k_tel", "Telefon", { type: "tel" }), T("k_mail", "E-Mail", { type: "email" }),
-  { t: "single", id: "k_eigentum", l: "Wem gehört die Immobilie?", o: ["mir allein", "Ehepaar / Lebenspartner", "mehreren Personen (Miteigentum / Bruchteil)", "einer Erbengemeinschaft", "einer Firma"] },
-  { t: "single", id: "k_vertretung", l: "Sie handeln als", o: ["Eigentümer/in", "Bevollmächtigte(r) / Vertretung"] },
-  { t: "area", id: "k_eigentuemer", l: "Weitere Eigentümer (Name, Anteil)" },
+ { id: "k5", n: "7", t: "Grundbuch & Rechtliches", f: [
   { t: "h", l: "Grundbuch und Kataster (steht im Grundbuchauszug)" },
   T("k_gemarkung", "Gemarkung"), T("k_blatt", "Grundbuchblatt"), T("k_flur", "Flur"), T("k_flurstueck", "Flurstück(e)"),
   { t: "h", l: "Rechte und Genehmigungen" },
   { t: "single", id: "k_rechte", l: "Gibt es Rechte oder Lasten? (z. B. Wegerecht, Wohnrecht, Erbbaurecht, Baulasten)", o: ["nein", "ja", "weiß ich nicht"] },
   { t: "area", id: "k_rechte_text", l: "Welche? (kurz beschreiben)" },
   { t: "single", id: "k_genehmigt", l: "Sind alle Gebäude und Anbauten genehmigt?", o: ["ja", "nein / teilweise", "weiß ich nicht"] } ] },
- { id: "k6", n: "7", t: "Ihre Wünsche & Besichtigung", f: [
+ { id: "k6", n: "8", t: "Ihre Wünsche & Besichtigung", f: [
   { t: "single", id: "k_frei", l: "Ab wann ist die Immobilie frei?", o: ["sofort", "nach Vereinbarung", "zu einem bestimmten Datum", "bleibt vermietet"] },
   T("k_frei_datum", "Frei ab", { type: "date" }),
   T("k_preis", "Ihre Preisvorstellung (€)", { num: 1 }),
@@ -340,19 +340,21 @@ const KSECTIONS = [
   T("k_besicht", "Wann sind Besichtigungen möglich?", { full: 1 }),
   { t: "area", id: "k_plus", l: "Was gefällt Ihnen besonders an Ihrer Immobilie?" },
   { t: "area", id: "k_hinweise", l: "Platz für Ihre Notizen oder Fragen" } ] },
- { id: "k7", n: "8", t: "Unterlagen-Liste", f: [
+ { id: "k7", n: "9", t: "Unterlagen-Liste", f: [
   { t: "hint", l: "Kreuzen Sie an, was Sie haben. Fehlende Unterlagen besorgen wir gern für Sie." },
   { t: "docs", id: "docs", rows: ["Grundbuchauszug", "Flurkarte", "Energieausweis", "Grundrisse / Bauzeichnungen", "Wohnflächenberechnung", "Baubeschreibung", "Baugenehmigung", "Teilungserklärung", "Wirtschaftsplan / Hausgeldabrechnung", "Protokolle Eigentümerversammlungen", "Mietverträge", "Grundsteuerbescheid", "Gebäudeversicherung", "Rechnungen zu Modernisierungen", "Sonstiges", "Baulastenauszug", "Vorhandene Gutachten", "Nebenkostenaufstellung", "Prüfberichte Heizung / Schornsteinfeger", "Prüfbericht Trinkwasser / Legionellen"], order: [0, 1, 2, 3, 4, 5, 6, 15, 7, 8, 9, 10, 17, 11, 12, 13, 16, 18, 19, 14], o: ["habe ich", "besorge ich", "nicht vorhanden", "bitte für mich besorgen"] } ] },
- { id: "k9", n: "9", t: "Beschreibung & Unterschrift", f: [
+ { id: "k9", n: "10", t: "Beschreibung & Unterschrift", f: [
   { t: "area", id: "k_beschreibung", l: "Beschreiben Sie Ihre Immobilie in eigenen Worten – was macht sie aus? Besonderheiten, Lage, Nachbarschaft, bekannte Mängel (gern stichpunktartig)", big: 1 },
   { t: "hint", l: "Datenschutz: Ihre Angaben verarbeiten wir ausschließlich zur Durchführung des Makler- bzw. Bewertungsauftrags (Art. 6 Abs. 1 lit. b DSGVO). Eine Weitergabe an Dritte, etwa an finanzierende Banken, erfolgt nur, soweit dies zur Auftragserfüllung erforderlich ist oder Sie eingewilligt haben. Einzelheiten und Ihre Rechte: Datenschutzerklärung auf www.immobilien-neuruppin.de." },
   { t: "sign", id: "k_sign", l: "Ich bestätige, dass meine Angaben der Wahrheit entsprechen und nach bestem Wissen und Gewissen gemacht wurden." },
   T("k_sign_ort", "Ort (das Datum wird beim Unterschreiben automatisch gespeichert)", { full: 1 }) ] }
 ];
 const KPHASES = [
-  { t: "Ihre Angaben", s: ["k1", "k2", "k8", "k3", "k4", "k5"] },
-  { t: "Fotos & Unterlagen", s: ["F", "k7", "D"] },
-  { t: "Abschluss", s: ["k6", "k9"] }
+  { t: "Über Sie", s: ["k0"] },
+  { t: "Ihre Immobilie", s: ["k1", "k2", "k8", "k3", "k4", "k5"] },
+  { t: "Ihre Wünsche", s: ["k6"] },
+  { t: "Fotos & Unterlagen", s: ["F", "D", "k7"] },
+  { t: "Abschluss", s: ["k9"] }
 ];
 const verkauf = d => d.k_auftrag !== "Vermietung / Verpachtung" && d.k_auftrag !== "Wertermittlung / Gutachten";
 const kKeller = d => ["voll unterkellert", "teilweise unterkellert", "Kellerraum (Wohnung)"].includes(d.k_keller);

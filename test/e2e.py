@@ -64,10 +64,10 @@ async def main():
             r = api("register", email="kollege@example.com", name="Max Kollege", password="kollege123"); print("register:", r["message"])
             r = api("login", email="kollege@example.com", password="kollege123"); print("login vor Freigabe:", r.get("message")); assert r["error"] == "pending"
             await pg.click("#home"); await pg.wait_for_selector("#toAdmin"); await pg.click("#toAdmin")
-            await pg.wait_for_selector('[data-st="freigegeben"]'); shots.append(await pg.screenshot())
-            await pg.click('[data-st="freigegeben"]'); await pg.wait_for_timeout(600)
-            await pg.click('[data-at="access"]'); await pg.wait_for_selector("[data-sel]")
-            await pg.select_option("[data-sel]", "kollege@example.com"); await pg.wait_for_timeout(800)
+            await pg.wait_for_selector('[data-act="block"][data-e="kollege@example.com"]'); shots.append(await pg.screenshot())
+            await pg.click('[data-act="block"][data-e="kollege@example.com"]'); await pg.click("#ctlOk"); await pg.wait_for_timeout(800)
+            await pg.click('[data-at="objekte"]'); await pg.wait_for_selector("[data-sel]")
+            await pg.select_option("[data-sel]", "kollege@example.com"); await pg.click("#ctlOk"); await pg.wait_for_timeout(800)
             shots.append(await pg.screenshot())
             print("Mails:", state()["mails"])
             # 4) Kollege meldet sich an, sieht das Objekt, lädt es und ergänzt

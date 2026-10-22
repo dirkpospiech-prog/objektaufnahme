@@ -112,6 +112,7 @@ const ROUTES = {
   // Admin
   listUsers: function (r) { requireAdmin(r); return { ok: true, users: table(SHEETS.users).rows.map(publicUser) }; },
   setUser: setUser,
+  deleteUser: deleteUser,
   resetPassword: resetPassword,
   setAccess: setAccess,
   createInvite: createInvite,
@@ -193,11 +194,39 @@ function setUser(r) {
     if (r.role && [ROLE.USER, ROLE.ADMIN].indexOf(r.role) >= 0 && u.role !== ROLE.KUNDE) sh.getRange(u._row, 4).setValue(r.role);
   });
   if (r.status === STATUS.BLOCKED) deleteSessionsOf(email);
-  if (r.status === STATUS.OK && u.status !== STATUS.OK) {
+  if (r.status === STATUS.OK && u.status !== STATUS.OK && u.role !== ROLE.KUNDE) {
     try { MailApp.sendEmail(email, CONFIG.APP_NAME + ': Zugang freigegeben', 'Hallo ' + u.name + ',\n\nIhr Zugang zur Objektaufnahme-App wurde freigegeben. Sie können sich jetzt mit Ihrer E-Mail-Adresse und Ihrem Passwort anmelden.\n\nImmobilien Pospiech GbR'); } catch (e) { console.warn(e); }
   }
   log(admin.email, 'Benutzer geändert', email + ' ' + (r.status || '') + ' ' + (r.role || ''));
   return { ok: true };
+}
+
+function deleteUser(r) {
+  const admin = requireAdmin(r);
+  const email = normEmail(r.email);
+  if (email === admin.email) return fail('invalid', 'Sie können Ihren eigenen Zugang nicht löschen.');
+  const u = findUser(email);
+  const pending = !u && (table(SHEETS.objects).rows.some(function (o) { return normEmail(o.kunde) === email; }) || table(SHEETS.invites).rows.some(function (x) { return normEmail(x.email) === email; }));
+  if (!u && !pending) return fail('not_found', 'Benutzer nicht gefunden.');
+  if (u && u.role === ROLE.ADMIN && table(SHEETS.users).rows.filter(function (x) { return x.role === ROLE.ADMIN && x.status === STATUS.OK; }).length <= 1) {
+    return fail('invalid', 'Der letzte Admin kann nicht gelöscht werden.');
+  }
+  let n = 0;
+  withLock(function () {
+    const so = sheet(SHEETS.objects);
+    table(SHEETS.objects).rows.forEach(function (o) {
+      const acc = splitEmails(o.access);
+      if (acc.indexOf(email) >= 0) { so.getRange(o._row, 5).setValue(acc.filter(function (x) { return x !== email; }).join(', ')); n++; }
+      if (normEmail(o.kunde) === email) { so.getRange(o._row, 11, 1, 2).setValues([['', '']]); n++; }
+    });
+    const si = sheet(SHEETS.invites);
+    table(SHEETS.invites).rows.filter(function (x) { return normEmail(x.email) === email; }).reverse().forEach(function (x) { si.deleteRow(x._row); });
+    const cur = findUser(email);
+    if (cur) sheet(SHEETS.users).deleteRow(cur._row);
+  });
+  deleteSessionsOf(email);
+  log(admin.email, u ? 'Benutzer gelöscht' : 'Einladung zurückgezogen', email + (u && u.role === ROLE.KUNDE ? ' (Eigentümer)' : '') + ', ' + n + ' Objektzuordnung(en) entfernt');
+  return { ok: true, objects: n };
 }
 
 function resetPassword(r) {

@@ -241,3 +241,6 @@ textarea.big { min-height: 220px; }
 .signed img { display: block; max-width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
 .signmeta { font-size: 13px; color: var(--muted); margin: 6px 0 10px; }
 @media (max-width: 560px) { .std.rate .lv { grid-template-columns: 28px minmax(0, 1fr); } .std.rate .lv .d { grid-column: 2; } }
+
+.kobj { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+.sublbl { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }

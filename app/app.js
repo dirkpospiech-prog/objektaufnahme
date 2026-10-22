@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.10.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -328,6 +328,11 @@ async function openObject(id, sec = "O", refreshOnly = false) {
   curPhotos = (await store.photosOf(id)).sort((a, b) => (a.taken || "").localeCompare(b.taken || ""));
   curFiles = (await store.filesOf(id)).sort((a, b) => (a.added || "").localeCompare(b.added || ""));
   view = "obj"; secIdx = sec;
+  if (isKunde() && !cur.locked && session.user) {   // Name und E-Mail aus der Einladung vorbelegen
+    const d = cur.data || (cur.data = {});
+    if (!d.k_name && session.user.name) d.k_name = session.user.name;
+    if (!d.k_mail && session.user.email) d.k_mail = session.user.email;
+  }
   if (refreshOnly) return rerenderKeepScroll();
   renderObj(); window.scrollTo(0, 0); go("obj");
   checkServerVersion();
@@ -335,11 +340,22 @@ async function openObject(id, sec = "O", refreshOnly = false) {
 }
 
 /* ---------------- Objekt-Ansicht ---------------- */
+/* Eigentümer: fester Ablauf Schritt für Schritt (Über Sie → Immobilie → … → Unterschrift), inkl. Fotos und Unterlagen */
+const kFlow = d => KPHASES.flatMap(p => p.s).map(id => (id === "F" || id === "D") ? id : KSECTIONS.findIndex(x => x.id === id)).filter(x => typeof x === "string" || vis(KSECTIONS[x], d));
+const stepName = x => x === "F" ? "Fotos" : x === "D" ? "Unterlagen" : SEC()[x].t;
+function flowFoot(here) {
+  const fl = kFlow(cur.data), pos = fl.indexOf(here), prev = fl[pos - 1], next = fl[pos + 1];
+  return `<div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(stepName(prev))}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
+    ${next !== undefined ? `<button class="btn primary" data-go="${next}">Weiter: ${esc(stepName(next))} ›</button>` : `<button class="btn primary" data-go="O">${cur.locked ? "Zur Übersicht" : "Fertig – zur Übergabe"} ›</button>`}</div>`;
+}
+function kNextStep(d) { return kFlow(d).find(x => typeof x === "number" && secProgress(SEC()[x], d) < 100) ?? kFlow(d)[0]; }
 function renderObj() {
   const d = cur.data; const [c, t] = syncState(cur);
-  const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + SEC().map((s, i) => !vis(s, d) ? "" : `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
-    + `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`
-    + `<button data-sec="D" aria-current="${secIdx === "D"}">${ICON.doc}Unterlagen<span class="p">${curFiles.length}</span></button>`
+  const tabBtn = x => x === "F" ? `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`
+    : x === "D" ? `<button data-sec="D" aria-current="${secIdx === "D"}">${ICON.doc}Unterlagen<span class="p">${curFiles.length}</span></button>`
+    : `<button data-sec="${x}" aria-current="${x === secIdx}"><span class="n">${SEC()[x].n}</span>${esc(SEC()[x].t)}<span class="p">${secProgress(SEC()[x], d)}%</span></button>`;
+  const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + (isKunde() ? kFlow(d).map(tabBtn).join("")
+    : SEC().map((s, i) => !vis(s, d) ? "" : tabBtn(i)).join("") + tabBtn("F") + tabBtn("D"))
     + (cur.kunde && !isKunde() ? `<button data-sec="K" aria-current="${secIdx === "K"}">${ICON.user}Eigentümer</button>` : "");
   $("#app").innerHTML = `
   <header class="top"><div class="wrap">
@@ -357,18 +373,18 @@ function renderSection() {
   const m = $("#main");
   const locked = isKunde() && cur.locked;
   const lockWrap = h => locked ? `<div class="msg ok" style="margin-top:14px">Ihre Angaben wurden an Immobilien Pospiech übergeben – vielen Dank! Für Änderungen rufen Sie uns bitte an: 03391 65 92 35 (Neuruppin) oder 033931 34 92 65 (Rheinsberg).</div><fieldset disabled class="fs">${h}</fieldset>` : h;
-  if (secIdx === "F") { m.innerHTML = lockWrap(photosHTML()); bindPhotos(); return; }
+  if (secIdx === "F") { m.innerHTML = lockWrap(photosHTML()) + (isKunde() ? flowFoot("F") : ""); bindPhotos(); return; }
   if (secIdx === "O") { m.innerHTML = overviewHTML(); return; }
-  if (secIdx === "D") { m.innerHTML = lockWrap(docsHTML()); bindDocs(); return; }
+  if (secIdx === "D") { m.innerHTML = lockWrap(docsHTML()) + (isKunde() ? flowFoot("D") : ""); bindDocs(); return; }
   if (secIdx === "K") { m.innerHTML = kundeHTML(); return; }
   const d = cur.data, list = visSections(d);
   if (!list.includes(secIdx)) secIdx = list.find(i => i > secIdx) ?? list[list.length - 1];
   const s = SEC()[secIdx], pos = list.indexOf(secIdx), prev = list[pos - 1], next = list[pos + 1];
-  const hint = !known(d) && !s.f.some(f => f.id === "ob_art") ? `<div class="msg info">Tipp: Erst die <b>${isKunde() ? "Art der Immobilie" : "Objektart"}</b> wählen (Abschnitt ${SEC()[artSec()].n}) – dann erscheinen nur noch die passenden Fragen.</div>` : "";
+  const hint = !known(d) && !s.f.some(f => f.id === "ob_art") && !(isKunde() && secIdx < artSec()) ? `<div class="msg info">Tipp: Erst die <b>${isKunde() ? "Art der Immobilie" : "Objektart"}</b> wählen (Abschnitt ${SEC()[artSec()].n}) – dann erscheinen nur noch die passenden Fragen.</div>` : "";
   m.innerHTML = lockWrap(`<section class="sec"><div class="sec-head"><span class="num">${s.n}</span><h2>${esc(s.t)}</h2></div>${hint}
     <div class="grp">${s.f.filter(f => vis(f, d)).map(f => fieldHTML(f, d)).join("")}</div></section>`) + `
-    <div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SEC()[prev].t)}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
-    ${next !== undefined ? `<button class="btn primary" data-go="${next}">${esc(SEC()[next].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`;
+    ${isKunde() ? flowFoot(secIdx) : `<div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SEC()[prev].t)}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
+    ${next !== undefined ? `<button class="btn primary" data-go="${next}">${esc(SEC()[next].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`}`;
 }
 const artSec = () => SEC().findIndex(s => s.f.some(f => f.id === "ob_art"));
 /* Objekt-Übersicht: alle Abschnitte nach Arbeitsschritten, mit Fortschritt */
@@ -382,7 +398,8 @@ function overviewHTML() {
     return `<button class="ov-row" data-sec="${i}"><span class="ov-n">${s.n}</span><span class="ov-t">${esc(s.t)}</span><span class="ov-p${p === 100 ? " done" : ""}">${p === 100 ? "✓" : p + " %"}</span><span class="ov-bar"><i style="width:${p}%"></i></span></button>`;
   };
   return `<section class="sec">
-    ${!known(d) ? `<div class="msg info">Zuerst die <b>Objektart</b> wählen – dann zeigt die App nur noch die passenden Fragen. <button type="button" class="btn small" data-sec="${artSec()}" style="margin-top:8px">${isKunde() ? "Art der Immobilie" : "Objektart"} wählen</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
+    ${isKunde() ? (cur.locked ? "" : (() => { const nx = kNextStep(d), started = nx !== kFlow(d)[0]; return `<div class="msg info">${started ? "Schön, dass Sie weitermachen." : "Willkommen! Wir gehen Schritt für Schritt vor: erst ein paar Angaben zu Ihnen, dann zu Ihrer Immobilie."}<button type="button" class="btn primary" data-go="${nx}" style="margin-top:10px;width:100%">${started ? "Weiter mit: " : "Los geht’s: "}${esc(stepName(nx))} ›</button></div>`; })())
+    : !known(d) ? `<div class="msg info">Zuerst die <b>Objektart</b> wählen – dann zeigt die App nur noch die passenden Fragen. <button type="button" class="btn small" data-sec="${artSec()}" style="margin-top:8px">${isKunde() ? "Art der Immobilie" : "Objektart"} wählen</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
     ${PHS().map(ph => `<div class="ov-group"><h3>${esc(ph.t)}</h3>${ph.s.map(row).join("")}</div>`).join("")}
     ${cur.kunde && !isKunde() ? `<div class="ov-group"><h3>Eigentümer</h3><button class="ov-row" data-sec="K"><span class="ov-n">${ICON.user}</span><span class="ov-t">Angaben des Eigentümers</span><span class="ov-p">${cur.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span></button></div>` : ""}
     <div class="ov-sync"><span class="chip ${c}">${esc(t)}</span>${isKunde() && cur.locked ? "" : `<button type="button" class="btn ${isKunde() ? "" : "primary"}" id="sync2">${ICON.sync}${isKunde() ? "Jetzt speichern" : "Jetzt abgleichen"}</button>`}</div>
@@ -937,35 +954,66 @@ async function syncNow(force = false) {
 /* ---------------- Verwaltung (Admin) ---------------- */
 async function renderAdmin(tab = "users", push = false) {
   view = "admin"; if (push) go("admin");
+  if (tab === "access") tab = "objekte";
   $("#app").innerHTML = `<header class="top"><div class="wrap"><button class="btn ghost" id="adminBack" aria-label="Zurück">${ICON.back}</button><h1>Verwaltung</h1></div></header>
-    <main class="wrap"><div class="tabs seg" style="margin-top:10px"><button data-at="users" aria-selected="${tab === "users"}">Benutzer</button><button data-at="access" aria-selected="${tab === "access"}">Objektzugriff</button><button data-at="kunden" aria-selected="${tab === "kunden"}">Eigentümer</button></div>
+    <main class="wrap"><div class="tabs seg" style="margin-top:10px"><button data-at="users" aria-selected="${tab === "users"}">Mitarbeiter</button><button data-at="kunden" aria-selected="${tab === "kunden"}">Eigentümer</button><button data-at="objekte" aria-selected="${tab === "objekte"}">Objekte</button></div>
     <div id="adm" class="list" style="padding-top:14px"><div class="empty">Wird geladen …</div></div></main>`;
   $("#adminBack").onclick = () => history.back();
   document.querySelectorAll("[data-at]").forEach(b => b.onclick = () => renderAdmin(b.dataset.at));
   try {
     const users = (await api("listUsers")).users;
-    if (tab === "users") return adminUsers(users);
+    if (tab === "users") return adminUsers(users.filter(u => u.role !== "kunde"));
     const objs = (await api("listObjects")).objects;
     if (tab === "kunden") return adminKunden(objs, users);
     adminAccess(objs, users.filter(u => u.role !== "kunde"));
   } catch (e) { $("#adm").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
+/* Kontrollfenster: jede Änderung in der Verwaltung muss bestätigt werden; Löschen zusätzlich mit „LÖSCHEN“ */
+function controlSheet({ title, html, label, danger = false, typed = false, fn }) {
+  sheet(`<h2>${esc(title)}</h2><div style="margin:0">${html}</div>
+    ${typed ? `<label class="fld"><span>Zur Bestätigung LÖSCHEN eintippen</span><input type="text" id="ctlTxt" autocomplete="off"></label>` : ""}
+    <div style="display:flex;gap:10px"><button class="btn" data-close style="flex:1">Abbrechen</button><button class="btn ${danger ? "danger" : "primary"}" id="ctlOk" style="flex:1"${typed ? " disabled" : ""}>${esc(label)}</button></div>`);
+  if (typed) $("#ctlTxt").oninput = e => { $("#ctlOk").disabled = e.target.value.trim().toUpperCase() !== "LÖSCHEN"; };
+  $("#ctlOk").onclick = async () => { $("#ctlOk").disabled = true; try { await fn(); } catch (x) { toast(x.message); $("#ctlOk").disabled = false; } };
+}
+function resetPwSheet(email, name, back) {
+  controlSheet({ title: "Passwort zurücksetzen?", html: `<p style="margin:0">Für <b>${esc(name || email)}</b> wird ein neues vorläufiges Passwort erzeugt. Das bisherige Passwort gilt dann nicht mehr und alle Anmeldungen werden beendet.</p>`, label: "Zurücksetzen",
+    fn: async () => { const r = await api("resetPassword", { email });
+      sheet(`<h2>Neues Passwort</h2><p style="margin:0">Teilen Sie dieses vorläufige Passwort ${esc(email)} persönlich oder telefonisch mit. Es sollte nach der Anmeldung geändert werden.</p><div style="font-size:24px;font-weight:700;letter-spacing:.08em;user-select:all;padding:10px;background:var(--sunk)">${esc(r.tempPassword)}</div><button class="btn" data-close>Fertig</button>`);
+      if (back) back(); } });
+}
+function blockSheet(u, back) {
+  const toBlock = u.status === "freigegeben";
+  controlSheet({ title: toBlock ? "Zugang sperren?" : "Zugang freigeben?", danger: toBlock, label: toBlock ? "Sperren" : "Freigeben",
+    html: `<p style="margin:0"><b>${esc(u.name)}</b> (${esc(u.email)}) ${toBlock ? "kann sich danach nicht mehr anmelden; laufende Anmeldungen werden sofort beendet. Daten und Objekte bleiben erhalten, die Sperre lässt sich jederzeit aufheben." : "kann sich danach (wieder) anmelden."}</p>`,
+    fn: async () => { await api("setUser", { email: u.email, status: toBlock ? "gesperrt" : "freigegeben" }); closeSheet(); toast(toBlock ? "Gesperrt" : "Freigegeben"); back(); } });
+}
+function deleteUserSheet(email, name, extra, back) {
+  controlSheet({ title: "Zugang löschen?", danger: true, typed: true, label: "Endgültig löschen",
+    html: `<p style="margin:0">Der Zugang von <b>${esc(name || email)}</b> (${esc(email)}) wird gelöscht. ${extra}</p><p style="margin:8px 0 0;color:var(--muted)">Das lässt sich nicht rückgängig machen – bei Bedarf einfach neu einladen bzw. neu registrieren lassen.</p>`,
+    fn: async () => { await api("deleteUser", { email }); closeSheet(); toast("Zugang gelöscht"); back(); } });
+}
 function adminUsers(users) {
   const order = { beantragt: 0, freigegeben: 1, gesperrt: 2 };
   users.sort((a, b) => (order[a.status] - order[b.status]) || a.name.localeCompare(b.name));
-  $("#adm").innerHTML = users.map(u => `<div class="admin-row"><div class="who"><b>${esc(u.name)}</b><span class="chip ${u.status === "freigegeben" ? "ok" : u.status === "beantragt" ? "warn" : "new"}">${esc(u.status)}${u.role === "admin" ? " · Admin" : u.role === "kunde" ? " · Eigentümer" : ""}</span></div>
+  const me = session.user.email;
+  $("#adm").innerHTML = `<div class="hint" style="font-style:normal;color:var(--muted)">Mitarbeiter und Kollegen mit Zugang zur App. Eigentümer-Zugänge finden Sie im Reiter „Eigentümer“.</div>` + (users.map(u => `<div class="admin-row"><div class="who"><b>${esc(u.name)}</b><span class="chip ${u.status === "freigegeben" ? "ok" : u.status === "beantragt" ? "warn" : "new"}">${esc(u.status)}${u.role === "admin" ? " · Admin" : ""}</span></div>
     <div style="color:var(--muted);font-size:14px">${esc(u.email)} · beantragt ${esc(fmtDate(u.requestedAt))}${u.lastLogin ? " · zuletzt " + esc(fmtTime(u.lastLogin)) : ""}</div>
-    <div class="btns">${u.status !== "freigegeben" ? `<button class="btn small primary" data-us="${esc(u.email)}" data-st="freigegeben">Freigeben</button>` : ""}
-      ${u.status !== "gesperrt" && u.email !== session.user.email ? `<button class="btn small danger" data-us="${esc(u.email)}" data-st="gesperrt">Sperren</button>` : ""}
-      ${u.email !== session.user.email && u.role !== "kunde" ? `<button class="btn small" data-us="${esc(u.email)}" data-ro="${u.role === "admin" ? "nutzer" : "admin"}">${u.role === "admin" ? "Admin-Rechte entziehen" : "Zum Admin machen"}</button>` : ""}
-      <button class="btn small" data-reset="${esc(u.email)}">Passwort zurücksetzen</button></div></div>`).join("") || `<div class="empty">Noch keine Benutzer.</div>`;
-  $("#adm").onclick = async e => {
-    const b = e.target.closest("button"); if (!b) return;
-    try {
-      if (b.dataset.us) { await api("setUser", { email: b.dataset.us, status: b.dataset.st, role: b.dataset.ro }); toast("Gespeichert"); return renderAdmin("users"); }
-      if (b.dataset.reset) { const r = await api("resetPassword", { email: b.dataset.reset });
-        sheet(`<h2>Neues Passwort</h2><p style="margin:0">Teilen Sie dieses vorläufige Passwort ${esc(b.dataset.reset)} persönlich oder telefonisch mit. Es sollte nach der Anmeldung geändert werden.</p><div style="font-size:24px;font-weight:700;letter-spacing:.08em;user-select:all;padding:10px;background:var(--sunk)">${esc(r.tempPassword)}</div><button class="btn" data-close>Fertig</button>`); }
-    } catch (x) { toast(x.message); }
+    <div class="btns">${u.status !== "freigegeben" ? `<button class="btn small primary" data-act="block" data-e="${esc(u.email)}">Freigeben</button>` : ""}
+      ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="block" data-e="${esc(u.email)}">Sperren</button>` : ""}
+      ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="role" data-e="${esc(u.email)}">${u.role === "admin" ? "Admin-Rechte entziehen" : "Zum Admin machen"}</button>` : ""}
+      <button class="btn small" data-act="pw" data-e="${esc(u.email)}">Passwort zurücksetzen</button>
+      ${u.email !== me ? `<button class="btn small danger" data-act="del" data-e="${esc(u.email)}">Löschen</button>` : ""}</div></div>`).join("") || `<div class="empty">Noch keine Benutzer.</div>`);
+  const back = () => renderAdmin("users");
+  $("#adm").onclick = e => {
+    const b = e.target.closest("[data-act]"); if (!b) return; const u = users.find(x => x.email === b.dataset.e); if (!u) return;
+    if (b.dataset.act === "block") return blockSheet(u, back);
+    if (b.dataset.act === "pw") return resetPwSheet(u.email, u.name, null);
+    if (b.dataset.act === "del") return deleteUserSheet(u.email, u.name, "Er wird aus allen Objektzugriffen entfernt. Objekte, Fotos und Unterlagen, die er angelegt hat, bleiben erhalten.", back);
+    if (b.dataset.act === "role") { const toAdmin = u.role !== "admin";
+      controlSheet({ title: toAdmin ? "Zum Admin machen?" : "Admin-Rechte entziehen?", label: toAdmin ? "Zum Admin machen" : "Rechte entziehen", danger: !toAdmin,
+        html: `<p style="margin:0"><b>${esc(u.name)}</b> ${toAdmin ? "sieht danach alle Objekte und kann Benutzer, Eigentümer und Objekte verwalten und löschen." : "sieht danach nur noch eigene und zugewiesene Objekte."}</p>`,
+        fn: async () => { await api("setUser", { email: u.email, role: toAdmin ? "admin" : "nutzer" }); closeSheet(); toast("Gespeichert"); back(); } }); }
   };
 }
 function inviteSheet(objectId, title, email) {
@@ -1009,40 +1057,72 @@ async function reopenKunde() {
   catch (e) { toast(e.message); }
 }
 function adminDelete(id, title) {
-  sheet(`<h2>Objekt löschen?</h2><p style="margin:0"><b>${esc(title)}</b> wird für alle Nutzer gelöscht. Der Drive-Ordner mit Fotos, Unterlagen und Protokoll kommt in den Google-Drive-Papierkorb und kann dort 30 Tage lang wiederhergestellt werden.</p>
+  sheet(`<h2>Objektaufnahme löschen?</h2><p style="margin:0"><b>${esc(title)}</b> wird für alle Nutzer gelöscht. Der Drive-Ordner mit Fotos, Unterlagen und Protokoll kommt in den Google-Drive-Papierkorb und kann dort 30 Tage lang wiederhergestellt werden.</p>
     <label class="fld"><span>Zur Bestätigung LÖSCHEN eintippen</span><input type="text" id="delConfirm" autocomplete="off"></label>
     <div style="display:flex;gap:10px"><button class="btn" data-close style="flex:1">Abbrechen</button><button class="btn danger" id="delGo" style="flex:1" disabled>Endgültig löschen</button></div>`);
   $("#delConfirm").oninput = e => { $("#delGo").disabled = e.target.value.trim().toUpperCase() !== "LÖSCHEN"; };
   $("#delGo").onclick = async () => {
     $("#delGo").disabled = true;
-    try { await api("deleteObject", { objectId: id }); await removeLocal(id); remote = remote.filter(x => x.id !== id); closeSheet(); toast("Objekt gelöscht"); if (view === "admin") renderAdmin("access"); else { cur = null; renderHome(false); } }
+    try { await api("deleteObject", { objectId: id }); await removeLocal(id); remote = remote.filter(x => x.id !== id); closeSheet(); toast("Objekt gelöscht"); if (view === "admin") renderAdmin("objekte"); else { cur = null; renderHome(false); } }
     catch (e) { toast(e.message); $("#delGo").disabled = false; }
   };
 }
 function adminKunden(objs, users) {
-  const ks = objs.filter(o => o.kunde);
-  const name = m => (users.find(u => u.email === m) || {}).name || "";
+  // Eigentümer = Zugänge mit Rolle „kunde“ plus offene Einladungen (Objekt mit Eigentümer, aber noch kein Zugang)
+  const by = new Map();
+  users.filter(u => u.role === "kunde").forEach(u => by.set(u.email, { email: u.email, user: u, objs: [] }));
+  objs.filter(o => o.kunde).forEach(o => { const k = o.kunde; if (!by.has(k)) by.set(k, { email: k, user: null, objs: [] }); by.get(k).objs.push(o); });
+  const list = [...by.values()].sort((a, b) => ((a.user && a.user.name) || a.email).localeCompare((b.user && b.user.name) || b.email));
+  const chip = x => !x.user ? `<span class="chip warn">Einladung offen</span>` : x.user.status === "gesperrt" ? `<span class="chip new">gesperrt</span>` : `<span class="chip ok">aktiv</span>`;
   $("#adm").innerHTML = `<button type="button" class="btn primary" id="newInv">${ICON.plus}Eigentümer einladen (neues Objekt)</button>
     <div class="hint" style="font-style:normal;color:var(--muted)">Für ein bestehendes Objekt: Aufnahme öffnen → ⋯ → Eigentümer einladen.</div>` +
-    (ks.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b><span class="chip ${o.kstatus === "übergeben" ? "ok" : "warn"}">${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span></div>
-      <div style="color:var(--muted);font-size:14px">${esc(name(o.kunde))} ${esc(o.kunde)} · zuletzt ${esc(fmtTime(o.updated))}</div>
-      <div class="btns">${o.kstatus === "übergeben" ? `<button class="btn small" data-kopen="${esc(o.id)}">Wieder freigeben</button>` : ""}<button class="btn small" data-kinv="${esc(o.id)}">Einladung erneut senden</button></div></div>`).join("") || `<div class="empty">Noch keine Eigentümer eingeladen.</div>`);
-  $("#adm").onclick = async e => {
+    (list.map((x, i) => `<div class="admin-row"><div class="who"><b>${esc((x.user && x.user.name) || x.email)}</b>${chip(x)}</div>
+      <div style="color:var(--muted);font-size:14px">${esc(x.email)}${x.user && x.user.lastLogin ? " · zuletzt angemeldet " + esc(fmtTime(x.user.lastLogin)) : ""}</div>
+      ${x.objs.map(o => `<div class="kobj"><div><b>${esc(o.title || "Ohne Bezeichnung")}</b> · <span class="chip ${o.kstatus === "übergeben" ? "ok" : "warn"}">${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span> <span style="color:var(--muted);font-size:13px">zuletzt ${esc(fmtTime(o.updated))}</span></div>
+        <div class="btns">${o.kstatus === "übergeben" ? `<button class="btn small" data-ka="reopen" data-o="${esc(o.id)}">Wieder zur Bearbeitung freigeben</button>` : ""}<button class="btn small" data-ka="inv" data-o="${esc(o.id)}">Einladung erneut senden</button></div></div>`).join("") || `<div style="color:var(--muted);font-size:14px">Keinem Objekt zugeordnet.</div>`}
+      <div class="btns">${x.user ? `<button class="btn small" data-ka="block" data-i="${i}">${x.user.status === "gesperrt" ? "Entsperren" : "Sperren"}</button><button class="btn small" data-ka="pw" data-i="${i}">Passwort zurücksetzen</button>` : ""}
+        <button class="btn small danger" data-ka="del" data-i="${i}">${x.user ? "Zugang löschen" : "Einladung zurückziehen"}</button></div></div>`).join("") || `<div class="empty">Noch keine Eigentümer eingeladen.</div>`);
+  const back = () => renderAdmin("kunden");
+  $("#adm").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.id === "newInv") return inviteSheet(null, "", "");
-    const o = objs.find(x => x.id === (b.dataset.kopen || b.dataset.kinv)); if (!o) return;
-    if (b.dataset.kinv) return inviteSheet(o.id, o.title, o.kunde);
-    try { await api("reopenKunde", { objectId: o.id }); toast("Wieder freigegeben"); renderAdmin("kunden"); } catch (x) { toast(x.message); }
+    const a = b.dataset.ka; if (!a) return;
+    if (b.dataset.o) {
+      const o = objs.find(x => x.id === b.dataset.o); if (!o) return;
+      if (a === "inv") return inviteSheet(o.id, o.title, o.kunde);
+      if (a === "reopen") return controlSheet({ title: "Wieder zur Bearbeitung freigeben?", label: "Freigeben",
+        html: `<p style="margin:0">Der Eigentümer kann seine Angaben zu <b>${esc(o.title || "")}</b> danach wieder ändern und muss sie erneut übergeben.</p>`,
+        fn: async () => { await api("reopenKunde", { objectId: o.id }); closeSheet(); toast("Wieder freigegeben"); back(); } });
+      return;
+    }
+    const x = list[+b.dataset.i]; if (!x) return; const nm = (x.user && x.user.name) || "";
+    if (a === "block") return blockSheet(x.user, back);
+    if (a === "pw") return resetPwSheet(x.email, nm, null);
+    if (a === "del") return x.user
+      ? deleteUserSheet(x.email, nm, `Er kann sich nicht mehr anmelden und sieht ${x.objs.length === 1 ? "das Objekt" : "die Objekte"} nicht mehr. Seine Angaben, Fotos und Unterlagen bleiben im Objekt erhalten.`, back)
+      : controlSheet({ title: "Einladung zurückziehen?", danger: true, label: "Zurückziehen",
+          html: `<p style="margin:0">Der Einladungslink für <b>${esc(x.email)}</b> wird ungültig und die Zuordnung zum Objekt entfernt. Das Objekt bleibt erhalten.</p>`,
+          fn: async () => { await api("deleteUser", { email: x.email }); closeSheet(); toast("Einladung zurückgezogen"); back(); } });
   };
 }
 function adminAccess(objs, users) {
   const ok = users.filter(u => u.status === "freigegeben");
-  $("#adm").innerHTML = objs.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b><span style="color:var(--muted);font-size:13px">angelegt von ${esc(o.creator)}</span></div>
+  $("#adm").innerHTML = `<div class="hint" style="font-style:normal;color:var(--muted)">Alle Objekte auf dem Server. Hier legen Sie fest, welche Kollegen ein Objekt sehen, und können Objekte löschen.</div>` + (objs.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b><span style="color:var(--muted);font-size:13px">angelegt von ${esc(o.creator)} · zuletzt ${esc(fmtTime(o.updated))}</span></div>
+    ${o.kunde ? `<div style="font-size:14px">Eigentümer: ${esc(o.kunde)} (${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"})</div>` : ""}
+    <div class="sublbl">Zugriff für Kollegen</div>
     <div class="emails">${o.access.map(m => `<span>${esc(m)}<button type="button" aria-label="Zugriff entfernen" data-rm="${esc(o.id)}" data-m="${esc(m)}">×</button></span>`).join("") || `<span style="color:var(--muted)">nur Ersteller und Admins</span>`}</div>
-    <div style="display:flex;gap:6px"><select data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Benutzer hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select><button type="button" class="btn small danger" data-odel="${esc(o.id)}">Löschen</button></div></div>`).join("") || `<div class="empty">Noch keine Objekte auf dem Server.</div>`;
-  const save = async (o, list) => { try { await api("setAccess", { objectId: o.id, emails: list }); toast("Zugriff gespeichert"); renderAdmin("access"); } catch (x) { toast(x.message); } };
-  $("#adm").onclick = e => { const od = e.target.closest("[data-odel]"); if (od) { const o = objs.find(x => x.id === od.dataset.odel); return adminDelete(o.id, o.title || "Ohne Bezeichnung"); } const b = e.target.closest("[data-rm]"); if (!b) return; const o = objs.find(x => x.id === b.dataset.rm); save(o, o.access.filter(m => m !== b.dataset.m)); };
-  $("#adm").onchange = e => { const s = e.target.closest("[data-sel]"); if (!s || !s.value) return; const o = objs.find(x => x.id === s.dataset.sel); save(o, [...o.access, s.value]); };
+    <select data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Kollegen hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select>
+    <div class="btns"><button type="button" class="btn small danger" data-odel="${esc(o.id)}">Objektaufnahme löschen</button></div></div>`).join("") || `<div class="empty">Noch keine Objekte auf dem Server.</div>`);
+  const save = async (o, list) => { await api("setAccess", { objectId: o.id, emails: list }); closeSheet(); toast("Zugriff gespeichert"); renderAdmin("objekte"); };
+  $("#adm").onclick = e => {
+    const od = e.target.closest("[data-odel]"); if (od) { const o = objs.find(x => x.id === od.dataset.odel); return adminDelete(o.id, o.title || "Ohne Bezeichnung"); }
+    const b = e.target.closest("[data-rm]"); if (!b) return; const o = objs.find(x => x.id === b.dataset.rm);
+    controlSheet({ title: "Zugriff entfernen?", danger: true, label: "Entfernen", html: `<p style="margin:0"><b>${esc(b.dataset.m)}</b> sieht <b>${esc(o.title || "")}</b> danach nicht mehr.</p>`, fn: () => save(o, o.access.filter(m => m !== b.dataset.m)) });
+  };
+  $("#adm").onchange = e => {
+    const s = e.target.closest("[data-sel]"); if (!s || !s.value) return; const o = objs.find(x => x.id === s.dataset.sel), m = s.value; s.value = "";
+    controlSheet({ title: "Zugriff geben?", label: "Zugriff geben", html: `<p style="margin:0"><b>${esc(m)}</b> sieht und bearbeitet <b>${esc(o.title || "")}</b> danach.</p>`, fn: () => save(o, [...o.access, m]) });
+  };
 }
 
 /* ---------------- Start ---------------- */
