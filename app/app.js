@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.8.1";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -241,7 +241,7 @@ async function renderHome(push = true) {
     ${STORAGE_OK ? "" : `<div class="msg warn">Dieses Gerät erlaubt kein dauerhaftes Speichern. Bitte nach jeder Aufnahme sofort abgleichen.</div>`}
     ${navigator.onLine ? "" : `<div class="msg info">Offline. Sie können normal weiterarbeiten – alles bleibt auf dem Gerät.</div>`}
     ${updateInfo ? `<div class="msg warn" style="display:flex;flex-direction:column;gap:10px"><div><b>Neue App-Version verfügbar</b> (${esc(updateInfo.name)}). Bitte installieren – Ihre Aufnahmen bleiben erhalten. Vorher nicht abgeglichene Aufnahmen abgleichen.</div><button type="button" class="btn primary" id="getUpdate">Jetzt herunterladen</button><div style="font-size:12px;word-break:break-all;color:var(--muted)">${APK_URL}</div></div>` : ""}
-    <div class="actions">${isKunde() ? "" : `<button class="btn primary" id="newObj">${ICON.plus}Neue Aufnahme</button>`}<button class="btn" id="refresh">${ICON.sync}Aktualisieren</button></div>
+    <div class="actions">${isKunde() ? "" : `<button class="btn primary" id="newObj">${ICON.plus}Neue Aufnahme</button>`}${isAdmin() ? `<button class="btn" id="homeInv">${ICON.user}Eigentümer einladen</button>` : ""}<button class="btn" id="refresh">${ICON.sync}Aktualisieren</button></div>
     <div id="homeMsg"></div>
     <div class="list">
       ${objects.map(card).join("")}
@@ -489,6 +489,7 @@ document.addEventListener("click", async e => {
   if (ds.fview) return viewDoc(ds.fview);
   if (ds.fdel) return confirmSheet("Unterlage löschen?", ds.onServer === "1" ? "Die Unterlage wird aus der Aufnahme entfernt (wirksam nach dem nächsten Abgleich). Die Datei bleibt zur Sicherheit im Drive-Ordner „Unterlagen“." : "Die Datei ist noch nicht auf dem Server und geht damit endgültig verloren.", "Löschen", () => deleteDoc(ds.fdel));
   if (b.id === "toAdmin") return renderAdmin("users", true);
+  if (b.id === "homeInv") return inviteSheet(null, "", "");
   if (b.id === "toAccount") return accountSheet();
   if (ds.open) return openObject(ds.open);
   if (ds.fetch) return fetchObject(ds.fetch);
@@ -845,7 +846,7 @@ async function syncNow(force = false) {
 async function renderAdmin(tab = "users", push = false) {
   view = "admin"; if (push) go("admin");
   $("#app").innerHTML = `<header class="top"><div class="wrap"><button class="btn ghost" id="adminBack" aria-label="Zurück">${ICON.back}</button><h1>Verwaltung</h1></div></header>
-    <main class="wrap"><div class="tabs" style="margin-top:10px"><button data-at="users" aria-selected="${tab === "users"}">Benutzer</button><button data-at="access" aria-selected="${tab === "access"}">Objektzugriff</button><button data-at="kunden" aria-selected="${tab === "kunden"}">Eigentümer</button></div>
+    <main class="wrap"><div class="tabs seg" style="margin-top:10px"><button data-at="users" aria-selected="${tab === "users"}">Benutzer</button><button data-at="access" aria-selected="${tab === "access"}">Objektzugriff</button><button data-at="kunden" aria-selected="${tab === "kunden"}">Eigentümer</button></div>
     <div id="adm" class="list" style="padding-top:14px"><div class="empty">Wird geladen …</div></div></main>`;
   $("#adminBack").onclick = () => history.back();
   document.querySelectorAll("[data-at]").forEach(b => b.onclick = () => renderAdmin(b.dataset.at));

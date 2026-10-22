@@ -226,3 +226,7 @@ fieldset.fs[disabled] .btn, fieldset.fs[disabled] .pill, fieldset.fs[disabled] .
   .top .btn.primary span { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+.tabs.seg { gap: 6px; border: 0; flex-wrap: wrap; }
+.tabs.seg button { flex: 1 1 auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px 12px; color: var(--ink, #2A2F35); }
+.tabs.seg button[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
