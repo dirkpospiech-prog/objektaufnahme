@@ -39,9 +39,12 @@ jobs:
 
       - name: Android-Projekt erzeugen
         run: |
+          echo "window.APP_BUILD = ${GITHUB_RUN_NUMBER};" > app/build.js
+          APP_VERSION=$(grep -oP 'APP_VERSION = "\K[^"]+' app/app.js)
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
           npx cap add android
           npx capacitor-assets generate --android
-          sed -i "s/versionCode [0-9]*/versionCode $((GITHUB_RUN_NUMBER + 100))/; s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" android/app/build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode $((GITHUB_RUN_NUMBER + 100))/; s/versionName \"[^\"]*\"/versionName \"${APP_VERSION}\"/" android/app/build.gradle
           npx cap sync android
 
       - name: APK bauen
@@ -69,7 +72,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: Objektaufnahme 1.0.${{ github.run_number }}
+          name: Objektaufnahme ${{ env.APP_VERSION }} (Build ${{ github.run_number }})
           body: |
             Automatisch gebaut aus dem Stand vom ${{ github.event.head_commit.timestamp || 'manuellen Start' }}.
             Installation: Objektaufnahme.apk auf dem Android-Handy öffnen und „Installieren“ tippen.

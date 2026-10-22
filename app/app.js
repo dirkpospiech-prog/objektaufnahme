@@ -2,7 +2,21 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
+const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
+const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
+let updateInfo = null;
+/* Nur in der Android-App: gibt es auf GitHub eine neuere Fassung? */
+async function checkForUpdate() {
+  if (!IS_APP || !APP_BUILD || !navigator.onLine) return;
+  try {
+    const r = await fetch("https://api.github.com/repos/dirkpospiech-prog/objektaufnahme/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
+    if (!r.ok) return; const j = await r.json();
+    const build = Number(String(j.tag_name || "").split(".").pop());
+    if (build > APP_BUILD) { updateInfo = { build, name: j.name || j.tag_name }; if (view === "home") renderHome(false); }
+  } catch (e) { /* kein Netz: beim nächsten Start */ }
+}
 const LS = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
@@ -192,6 +206,7 @@ async function renderHome(push = true) {
     <div class="home-head"><div class="eyebrow">Angemeldet als ${esc(u.name)}</div><h2>Objektaufnahmen</h2></div>
     ${STORAGE_OK ? "" : `<div class="msg warn">Dieses Gerät erlaubt kein dauerhaftes Speichern. Bitte nach jeder Aufnahme sofort abgleichen.</div>`}
     ${navigator.onLine ? "" : `<div class="msg info">Offline. Sie können normal weiterarbeiten – alles bleibt auf dem Gerät.</div>`}
+    ${updateInfo ? `<div class="msg warn" style="display:flex;flex-direction:column;gap:10px"><div><b>Neue App-Version verfügbar</b> (${esc(updateInfo.name)}). Bitte installieren – Ihre Aufnahmen bleiben erhalten. Vorher nicht abgeglichene Aufnahmen abgleichen.</div><button type="button" class="btn primary" id="getUpdate">Jetzt herunterladen</button><div style="font-size:12px;word-break:break-all;color:var(--muted)">${APK_URL}</div></div>` : ""}
     <div class="actions"><button class="btn primary" id="newObj">${ICON.plus}Neue Aufnahme</button><button class="btn" id="refresh">${ICON.sync}Aktualisieren</button></div>
     <div id="homeMsg"></div>
     <div class="list">
@@ -199,7 +214,7 @@ async function renderHome(push = true) {
       ${remoteOnly.map(rcard).join("")}
       ${!objects.length && !remoteOnly.length ? `<div class="empty">Noch keine Aufnahmen.<br>Mit „Neue Aufnahme“ beginnen Sie den Ortstermin.</div>` : ""}
     </div>
-    <div class="foot">Version ${APP_VERSION}</div>
+    <div class="foot">Version ${APP_VERSION}${APP_BUILD ? " · Build " + APP_BUILD : " · Web"}</div>
   </main>`;
   if (navigator.onLine && Date.now() - (refreshRemote.at || 0) > 15000) refreshRemote(true);
 }
@@ -353,6 +368,7 @@ document.addEventListener("click", async e => {
   const ds = b.dataset;
   if (b.id === "newObj") return newObject();
   if (b.id === "refresh") return refreshRemote(false);
+  if (b.id === "getUpdate") { window.location.href = APK_URL; return; }
   if (b.id === "toAdmin") return renderAdmin("users", true);
   if (b.id === "toAccount") return accountSheet();
   if (ds.open) return openObject(ds.open);
@@ -610,5 +626,6 @@ function adminAccess(objs, users) {
   window.addEventListener("offline", () => { if (view === "home") renderHome(false); });
   try { history.replaceState({ v: "root" }, ""); } catch (e) {}
   if (session && session.token) renderHome(false); else renderAuth();
+  checkForUpdate();
   if ("serviceWorker" in navigator && location.protocol === "https:" && !window.Capacitor) { try { navigator.serviceWorker.register("sw.js"); } catch (e) {} }
 })();
