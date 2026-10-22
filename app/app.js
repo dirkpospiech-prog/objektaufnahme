@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.11.1";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -962,15 +962,16 @@ async function renderAdmin(tab = "users", push = false) {
   view = "admin"; if (push) go("admin");
   if (tab === "access") tab = "objekte";
   $("#app").innerHTML = `<header class="top"><div class="wrap"><button class="btn ghost" id="adminBack" aria-label="Zurück">${ICON.back}</button><h1>Verwaltung</h1></div></header>
-    <main class="wrap"><div class="tabs seg" style="margin-top:10px"><button data-at="users" aria-selected="${tab === "users"}">Mitarbeiter</button><button data-at="kunden" aria-selected="${tab === "kunden"}">Eigentümer</button><button data-at="objekte" aria-selected="${tab === "objekte"}">Objekte</button></div>
+    <main class="wrap adm"><div class="tabs seg admtabs"><button data-at="users" aria-selected="${tab === "users"}">Team</button><button data-at="kunden" aria-selected="${tab === "kunden"}">Kunden</button><button data-at="objekte" aria-selected="${tab === "objekte"}">Objekte</button></div>
     <div id="adm" class="list" style="padding-top:14px"><div class="empty">Wird geladen …</div></div></main>`;
   $("#adminBack").onclick = () => history.back();
   document.querySelectorAll("[data-at]").forEach(b => b.onclick = () => renderAdmin(b.dataset.at));
   try {
     const resp = await api("listUsers"), users = resp.users;
-    if (tab === "users") return adminUsers(users.filter(u => u.role !== "kunde"), resp.invites || []);
+    const inv = resp.invites || [];
+    if (tab === "users") return adminUsers(users.filter(u => u.role !== "kunde"), inv.filter(v => v.role !== "kunde"));
     const objs = (await api("listObjects")).objects;
-    if (tab === "kunden") return adminKunden(objs, users);
+    if (tab === "kunden") return adminKunden(objs, users, inv.filter(v => v.role === "kunde"));
     adminAccess(objs, users.filter(u => u.role !== "kunde"));
   } catch (e) { $("#adm").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
@@ -1029,17 +1030,16 @@ function adminUsers(users, invites = []) {
   const order = { beantragt: 0, freigegeben: 1, gesperrt: 2 };
   users.sort((a, b) => (order[a.status] - order[b.status]) || a.name.localeCompare(b.name));
   const me = session.user.email;
-  $("#adm").innerHTML = `<button type="button" class="btn primary" id="newStaff">${ICON.plus}Mitarbeiter einladen</button>
-    <div class="hint" style="font-style:normal;color:var(--muted)">Mitarbeiter und Kollegen mit Zugang zur App. Eigentümer-Zugänge finden Sie im Reiter „Eigentümer“.</div>` +
+  $("#adm").innerHTML = `<button type="button" class="btn primary" id="newStaff">${ICON.plus}Mitarbeiter einladen</button>` +
     invites.map((v, i) => `<div class="admin-row"><div class="who"><b>${esc(v.name || v.email)}</b><span class="chip warn">Einladung offen · ${ROLE_LBL(v.role)}</span></div>
-      <div style="color:var(--muted);font-size:14px">${esc(v.email)} · eingeladen ${esc(fmtDate(v.created))} · gültig bis ${esc(fmtDate(v.until))}</div>
+      <div class="meta">${esc(v.email)}<br>gültig bis ${esc(fmtDate(v.until))}</div>
       <div class="btns"><button class="btn small" data-inv="re" data-i="${i}">Erneut senden</button><button class="btn small danger" data-inv="del" data-i="${i}">Einladung zurückziehen</button></div></div>`).join("") +
     (users.map(u => `<div class="admin-row"><div class="who"><b>${esc(u.name)}</b><span class="chip ${u.status === "freigegeben" ? "ok" : u.status === "beantragt" ? "warn" : "new"}">${esc(u.status)} · ${ROLE_LBL(u.role)}</span></div>
-    <div style="color:var(--muted);font-size:14px">${esc(u.email)} · beantragt ${esc(fmtDate(u.requestedAt))}${u.lastLogin ? " · zuletzt " + esc(fmtTime(u.lastLogin)) : ""}</div>
+    <div class="meta">${esc(u.email)}${u.lastLogin ? "<br>zuletzt angemeldet " + esc(fmtTime(u.lastLogin)) : u.status === "beantragt" ? "<br>beantragt " + esc(fmtDate(u.requestedAt)) : ""}</div>
     <div class="btns">${u.status !== "freigegeben" ? `<button class="btn small primary" data-act="block" data-e="${esc(u.email)}">Freigeben</button>` : ""}
       ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="block" data-e="${esc(u.email)}">Sperren</button>` : ""}
-      ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="role" data-e="${esc(u.email)}">${u.role === "admin" ? "Rolle: zu Kollege ändern" : "Rolle: zu Admin ändern"}</button>` : ""}
-      <button class="btn small" data-act="pw" data-e="${esc(u.email)}">Passwort zurücksetzen</button>
+      ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="role" data-e="${esc(u.email)}">${u.role === "admin" ? "Zu Kollege machen" : "Zum Admin machen"}</button>` : ""}
+      <button class="btn small" data-act="pw" data-e="${esc(u.email)}">Neues Passwort</button>
       ${u.email !== me ? `<button class="btn small danger" data-act="del" data-e="${esc(u.email)}">Löschen</button>` : ""}</div></div>`).join("") || `<div class="empty">Noch keine Benutzer.</div>`);
   const back = () => renderAdmin("users");
   $("#adm").onclick = e => {
@@ -1110,20 +1110,21 @@ function adminDelete(id, title) {
     catch (e) { toast(e.message); $("#delGo").disabled = false; }
   };
 }
-function adminKunden(objs, users) {
+function adminKunden(objs, users, kinv = []) {
   // Eigentümer = Zugänge mit Rolle „kunde“ plus offene Einladungen (Objekt mit Eigentümer, aber noch kein Zugang)
   const by = new Map();
   users.filter(u => u.role === "kunde").forEach(u => by.set(u.email, { email: u.email, user: u, objs: [] }));
   objs.filter(o => o.kunde).forEach(o => { const k = o.kunde; if (!by.has(k)) by.set(k, { email: k, user: null, objs: [] }); by.get(k).objs.push(o); });
+  kinv.forEach(v => { if (by.has(v.email)) by.get(v.email).invName = v.name; });
   const list = [...by.values()].sort((a, b) => ((a.user && a.user.name) || a.email).localeCompare((b.user && b.user.name) || b.email));
   const chip = x => !x.user ? `<span class="chip warn">Einladung offen</span>` : x.user.status === "gesperrt" ? `<span class="chip new">gesperrt</span>` : `<span class="chip ok">aktiv</span>`;
-  $("#adm").innerHTML = `<button type="button" class="btn primary" id="newInv">${ICON.plus}Eigentümer einladen (neues Objekt)</button>
-    <div class="hint" style="font-style:normal;color:var(--muted)">Für ein bestehendes Objekt: Aufnahme öffnen → ⋯ → Eigentümer einladen.</div>` +
-    (list.map((x, i) => `<div class="admin-row"><div class="who"><b>${esc((x.user && x.user.name) || x.email)}</b>${chip(x)}</div>
-      <div style="color:var(--muted);font-size:14px">${esc(x.email)}${x.user && x.user.lastLogin ? " · zuletzt angemeldet " + esc(fmtTime(x.user.lastLogin)) : ""}</div>
-      ${x.objs.map(o => `<div class="kobj"><div><b>${esc(o.title || "Ohne Bezeichnung")}</b> · <span class="chip ${o.kstatus === "übergeben" ? "ok" : "warn"}">${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span> <span style="color:var(--muted);font-size:13px">zuletzt ${esc(fmtTime(o.updated))}</span></div>
-        <div class="btns">${o.kstatus === "übergeben" ? `<button class="btn small" data-ka="reopen" data-o="${esc(o.id)}">Wieder zur Bearbeitung freigeben</button>` : ""}<button class="btn small" data-ka="inv" data-o="${esc(o.id)}">Einladung erneut senden</button></div></div>`).join("") || `<div style="color:var(--muted);font-size:14px">Keinem Objekt zugeordnet.</div>`}
-      <div class="btns">${x.user ? `<button class="btn small" data-ka="block" data-i="${i}">${x.user.status === "gesperrt" ? "Entsperren" : "Sperren"}</button><button class="btn small" data-ka="pw" data-i="${i}">Passwort zurücksetzen</button>` : ""}
+  $("#adm").innerHTML = `<button type="button" class="btn primary" id="newInv">${ICON.plus}Eigentümer einladen</button>
+    <div class="admhint">Für ein bestehendes Objekt: Aufnahme öffnen → ⋯ → Eigentümer einladen.</div>` +
+    (list.map((x, i) => `<div class="admin-row"><div class="who"><b>${esc((x.user && x.user.name) || x.invName || x.email)}</b>${chip(x)}</div>
+      <div class="meta">${esc(x.email)}${x.user && x.user.lastLogin ? "<br>zuletzt angemeldet " + esc(fmtTime(x.user.lastLogin)) : ""}</div>
+      ${x.objs.map(o => `<div class="kobj"><b>${esc(o.title || "Ohne Bezeichnung")}</b><div class="meta"><span class="chip ${o.kstatus === "übergeben" ? "ok" : "warn"}">${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span> zuletzt ${esc(fmtTime(o.updated))}</div>
+        <div class="btns">${o.kstatus === "übergeben" ? `<button class="btn small" data-ka="reopen" data-o="${esc(o.id)}">Wieder freigeben</button>` : ""}<button class="btn small" data-ka="inv" data-o="${esc(o.id)}">Einladung erneut senden</button></div></div>`).join("") || `<div class="meta">Keinem Objekt zugeordnet.</div>`}
+      <div class="btns">${x.user ? `<button class="btn small" data-ka="block" data-i="${i}">${x.user.status === "gesperrt" ? "Entsperren" : "Sperren"}</button><button class="btn small" data-ka="pw" data-i="${i}">Neues Passwort</button>` : ""}
         <button class="btn small danger" data-ka="del" data-i="${i}">${x.user ? "Zugang löschen" : "Einladung zurückziehen"}</button></div></div>`).join("") || `<div class="empty">Noch keine Eigentümer eingeladen.</div>`);
   const back = () => renderAdmin("kunden");
   $("#adm").onclick = e => {
@@ -1150,11 +1151,11 @@ function adminKunden(objs, users) {
 }
 function adminAccess(objs, users) {
   const ok = users.filter(u => u.status === "freigegeben");
-  $("#adm").innerHTML = `<div class="hint" style="font-style:normal;color:var(--muted)">Alle Objekte auf dem Server. Hier legen Sie fest, welche Kollegen ein Objekt sehen, und können Objekte löschen.</div>` + (objs.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b><span style="color:var(--muted);font-size:13px">angelegt von ${esc(o.creator)} · zuletzt ${esc(fmtTime(o.updated))}</span></div>
-    ${o.kunde ? `<div style="font-size:14px">Eigentümer: ${esc(o.kunde)} (${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"})</div>` : ""}
+  $("#adm").innerHTML = `<div class="admhint">Alle Objektaufnahmen: festlegen, welche Kollegen ein Objekt sehen, oder Objekte löschen.</div>` + (objs.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b></div>
+    <div class="meta">angelegt von ${esc(o.creator)}<br>zuletzt geändert ${esc(fmtTime(o.updated))}${o.kunde ? `<br>Eigentümer: ${esc(o.kunde)} (${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"})` : ""}</div>
     <div class="sublbl">Zugriff für Kollegen</div>
     <div class="emails">${o.access.map(m => `<span>${esc(m)}<button type="button" aria-label="Zugriff entfernen" data-rm="${esc(o.id)}" data-m="${esc(m)}">×</button></span>`).join("") || `<span style="color:var(--muted)">nur Ersteller und Admins</span>`}</div>
-    <select data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Kollegen hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select>
+    <select class="admsel" data-sel="${esc(o.id)}" aria-label="Benutzer auswählen"><option value="">Kollegen hinzufügen …</option>${ok.filter(u => u.email !== o.creator && !o.access.includes(u.email)).map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("")}</select>
     <div class="btns"><button type="button" class="btn small danger" data-odel="${esc(o.id)}">Objektaufnahme löschen</button></div></div>`).join("") || `<div class="empty">Noch keine Objekte auf dem Server.</div>`);
   const save = async (o, list) => { await api("setAccess", { objectId: o.id, emails: list }); closeSheet(); toast("Zugriff gespeichert"); renderAdmin("objekte"); };
   $("#adm").onclick = e => {

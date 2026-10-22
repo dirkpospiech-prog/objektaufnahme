@@ -251,3 +251,22 @@ textarea.big { min-height: 220px; }
 .rp span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--muted); }
 .rp b { color: var(--ink-strong); font-size: 15px; }
 .rp:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+
+/* Verwaltung – handytauglich */
+.adm { padding-top: 10px; padding-bottom: 24px; }
+.admtabs { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; position: sticky; top: calc(58px + env(safe-area-inset-top, 0px)); z-index: 4; background: var(--bg); padding: 8px 0; margin: 0; }
+.admtabs button { min-width: 0; padding: 10px 2px !important; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adm .list { gap: 10px; }
+.adm #adm > .btn.primary { width: 100%; }
+.admhint { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.admin-row { gap: 6px; }
+.admin-row .who { flex-direction: column; align-items: flex-start; gap: 4px; }
+.admin-row .who b { font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
+.admin-row .meta, .kobj .meta { font-size: 13px; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }
+.admin-row .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.admin-row .btns .btn { flex: 1 1 130px; white-space: normal; line-height: 1.2; min-height: 40px; padding: 8px 6px; text-align: center; justify-content: center; }
+.admin-row .btns .btn.danger { flex-basis: 100%; }
+.kobj { background: var(--sunk); border: 1px solid var(--line) !important; padding: 10px; margin-top: 2px; gap: 4px; }
+.kobj b { overflow-wrap: anywhere; }
+.admsel { width: 100%; min-height: 42px; }
+.emails span { overflow-wrap: anywhere; max-width: 100%; }

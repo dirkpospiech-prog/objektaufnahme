@@ -114,8 +114,8 @@ const ROUTES = {
     requireAdmin(r); ensureCols();
     const now = new Date(), users = table(SHEETS.users).rows;
     const invites = table(SHEETS.invites).rows.filter(function (x) {
-      return !x.used && (x.role === ROLE.USER || x.role === ROLE.ADMIN) && new Date(x.until) > now && !users.some(function (u) { return u.email === normEmail(x.email); });
-    }).map(function (x) { return { email: normEmail(x.email), name: x.name, role: x.role, until: x.until, created: x.created }; });
+      return !x.used && new Date(x.until) > now && !users.some(function (u) { return u.email === normEmail(x.email); });
+    }).map(function (x) { return { email: normEmail(x.email), name: x.name, role: (x.role === ROLE.USER || x.role === ROLE.ADMIN) ? x.role : ROLE.KUNDE, until: x.until, created: x.created }; });
     return { ok: true, users: users.map(publicUser), invites: invites };
   },
   inviteStaff: inviteStaff,
