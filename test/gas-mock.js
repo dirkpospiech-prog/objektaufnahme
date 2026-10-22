@@ -60,6 +60,7 @@ class Doc {
   getId() { return this.id; }
   getBody() { const d = this; const chain = { setHeading() { return chain; } };
     return { clear() { d.parts = []; }, appendParagraph(t) { d.parts.push(t); return chain; },
+      appendImage(b) { d.parts.push("[BILD Unterschrift]"); let w = 600, h = 190; const img = { getWidth: () => w, getHeight: () => h, setWidth(x) { w = x; return img; }, setHeight(x) { h = x; return img; } }; return img; },
       appendTable(cells) { d.parts.push(...cells.map(c => c.join(": "))); const cell = { setWidth() { return cell; }, editAsText() { return { setBold() {} }; } };
         return { setBorderColor() {}, getNumRows: () => cells.length, getRow: () => ({ getCell: () => cell }) }; } }; }
   saveAndClose() {}

@@ -33,8 +33,8 @@ async def main():
             print("Kunde sieht SV-Daten (Auftragsnr)?", "SV-INTERN-77" in await C.content())
             shots.append(await C.screenshot(full_page=False))
             await C.click('#secnav [data-sec="0"]'); await C.click('[data-k="ob_art"][data-v="Einfamilienhaus"]'); await C.fill("#f_k_wfl","142"); await C.fill("#f_k_bj","1998")
-            await C.click('#secnav [data-sec="3"]'); await C.click('[data-k="nutzung"][data-v="eigengenutzt"]')
-            await C.click('#secnav [data-sec="5"]'); await C.fill("#f_k_preis","389000")
+            await C.click('#secnav [data-sec="4"]'); await C.click('[data-k="nutzung"][data-v="eigengenutzt"]')
+            await C.click('#secnav [data-sec="6"]'); await C.fill("#f_k_preis","389000")
             await C.click('#secnav [data-sec="F"]'); await C.set_input_files("#galIn","/tmp/claude-0/test.jpg"); await C.wait_for_timeout(1200)
             await C.click('#secnav [data-sec="D"]'); await C.select_option("#docType", label="Energieausweis"); await C.set_input_files("#docIn","/tmp/claude-0/grundbuch.pdf"); await C.wait_for_timeout(800)
             await sync(C)
@@ -53,6 +53,7 @@ async def main():
             await A.click('#secnav [data-sec="0"]'); await A.fill("#f_adressat","Sparkasse"); await sync(A)
             g = api("getObject", token=tok, id=oid)["object"]; print("Nach SV-Abgleich Kunde-Preis noch da:", g["kd"].get("k_preis"), "| Fotos gesamt:", len(g["photos"]))
             # Kunde übergibt
+            await C.evaluate("cur.data.k_sign = {img: 'data:image/png;base64,iVBORw0KGgo=', at: new Date().toISOString(), name: 'Erika'}; touch()"); await C.wait_for_timeout(300)
             await C.click('#secnav [data-sec="O"]'); await C.click("#submitK"); await C.click("#cOk"); await C.wait_for_timeout(4000)
             print("Kunde gesperrt:", await C.locator("fieldset.fs[disabled]").count() >= 0, "| Status:", await C.inner_text(".ov-sync .chip"))
             await C.click('#secnav [data-sec="0"]'); print("Eingabefelder gesperrt:", await C.is_disabled("#f_k_wfl"))

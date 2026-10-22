@@ -308,13 +308,13 @@ function saveObject(r) {
     else folder.createFile('aufnahme.json', content, 'application/json');
     if (!isKunde) sheet(SHEETS.objects).getRange(o._row, 2, 1, 1).setValue(obj.title || '');
     sheet(SHEETS.objects).getRange(o._row, 7, 1, 3).setValues([[now, u.email, version]]);
-    try { writeProtocol(folder, obj, r.protocol || [], u, now, isKunde ? 'Angaben des Eigentümers' : 'Aufnahmeprotokoll'); } catch (e) { console.warn('Protokoll: ' + e); }
+    try { writeProtocol(folder, obj, r.protocol || [], u, now, isKunde ? 'Angaben des Eigentümers' : 'Aufnahmeprotokoll', isKunde ? (obj.data || {}) : null); } catch (e) { console.warn('Protokoll: ' + e); }
     log(u.email, isKunde ? 'Eigentümer-Angaben gespeichert' : 'Objekt gespeichert', obj.id + ' ' + (o.title || obj.title || '') + ' v' + version);
     return { ok: true, version: version, svVersion: rec.svVersion || null, folderUrl: isKunde ? '' : folder.getUrl() };
   });
 }
 
-function writeProtocol(folder, obj, protocol, u, now, docName) {
+function writeProtocol(folder, obj, protocol, u, now, docName, kd) {
   docName = docName || 'Aufnahmeprotokoll';
   let doc;
   const it = folder.getFilesByName(docName);
@@ -338,6 +338,18 @@ function writeProtocol(folder, obj, protocol, u, now, docName) {
       t.getRow(i).getCell(0).setWidth(170).editAsText().setBold(true);
     }
   });
+  const sg = kd && kd.k_sign;
+  if (sg && sg.img && /^data:image\/(png|jpeg);base64,/.test(sg.img)) {
+    try {
+      body.appendParagraph('Bestätigung und Unterschrift').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      body.appendParagraph('Ich bestätige, dass meine Angaben der Wahrheit entsprechen und nach bestem Wissen und Gewissen gemacht wurden.');
+      const m = sg.img.match(/^data:(image\/(?:png|jpeg));base64,(.*)$/);
+      const img = body.appendImage(Utilities.newBlob(Utilities.base64Decode(m[2]), m[1], 'unterschrift'));
+      const w = img.getWidth(), h = img.getHeight(); if (w > 300) { img.setWidth(300); img.setHeight(Math.round(h * 300 / w)); }
+      const when = sg.at ? Utilities.formatDate(new Date(sg.at), 'Europe/Berlin', 'dd.MM.yyyy HH:mm') + ' Uhr' : '';
+      body.appendParagraph([kd.k_sign_ort, when].filter(String).join(', ') + (sg.name ? ' · ' + sg.name : ''));
+    } catch (e) { console.warn('Unterschrift: ' + e); }
+  }
   doc.saveAndClose();
 }
 

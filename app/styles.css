@@ -230,3 +230,14 @@ fieldset.fs[disabled] .btn, fieldset.fs[disabled] .pill, fieldset.fs[disabled] .
 .tabs.seg { gap: 6px; border: 0; flex-wrap: wrap; }
 .tabs.seg button { flex: 1 1 auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px 12px; color: var(--ink, #2A2F35); }
 .tabs.seg button[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+.std.rate .lv { grid-template-columns: 28px 160px minmax(0, 1fr); }
+.std .lv .d { color: var(--muted); }
+textarea.big { min-height: 220px; }
+.signbox .signtxt { margin: 2px 0 10px; font-size: 15px; color: var(--ink-strong); }
+.signpad { display: block; width: 100%; height: 190px; background: #fff; border: 2px dashed var(--line-strong); border-radius: 6px; touch-action: none; cursor: crosshair; }
+.signhint { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.signbtns { display: flex; gap: 10px; margin-top: 10px; } .signbtns .btn { flex: 1; }
+.signed img { display: block; max-width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+.signmeta { font-size: 13px; color: var(--muted); margin: 6px 0 10px; }
+@media (max-width: 560px) { .std.rate .lv { grid-template-columns: 28px minmax(0, 1fr); } .std.rate .lv .d { grid-column: 2; } }

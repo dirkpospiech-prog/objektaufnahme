@@ -1,5 +1,5 @@
 /* Offline-Cache für die Web-Version (in der Android-App liegen die Dateien ohnehin auf dem Gerät). */
-const CACHE = "objektaufnahme-v1.8.2";
+const CACHE = "objektaufnahme-v1.9.0";
 const FILES = ["./", "index.html", "styles.css", "app.js", "schema.js", "config.js", "build.js", "vendor/jspdf.umd.min.js", "logo.png", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png",
   "fonts/dm-sans-latin-400-normal.woff2", "fonts/dm-sans-latin-500-normal.woff2", "fonts/dm-sans-latin-600-normal.woff2",

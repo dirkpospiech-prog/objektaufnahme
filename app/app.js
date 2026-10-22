@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.8.2";
+const APP_VERSION = "1.9.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -101,6 +101,7 @@ function filled(f, d) {
   if (f.t === "yn") return !!(v && v.v);
   if (f.t === "grid") return Array.isArray(v) && v.some(r => r && Object.values(r).some(Boolean));
   if (f.t === "std") return !!(v && v.lv && v.lv.length);
+  if (f.t === "sign") return !!(v && v.img);
   if (f.t === "modern" || f.t === "docs") return !!v && Object.values(v).some(r => r && Object.values(r).some(Boolean));
   if (Array.isArray(v)) return v.length > 0;
   return v !== undefined && v !== null && String(v).trim() !== "";
@@ -112,7 +113,7 @@ const countable = f => !["h", "hint", "stdall"].includes(f.t);
 const vis = (x, d) => !x.when || x.when(d);
 const optsOf = (f, d) => f.opts ? f.opts(d) : f.o;
 const visSections = d => SEC().map((s, i) => i).filter(i => vis(SEC()[i], d));
-const visRows = (f, d) => f.rows.map((l, i) => i).filter(i => !f.rowWhen || !f.rowWhen[i] || f.rowWhen[i](d));
+const visRows = (f, d) => (f.order || f.rows.map((l, i) => i)).filter(i => !f.rowWhen || !f.rowWhen[i] || f.rowWhen[i](d));
 /* Nach einer Änderung: Auswahlen bereinigen, die es für die neue Objektart nicht mehr gibt, und Verfahren vorbelegen */
 function applyCascade(d) {
   SEC().forEach(s => s.f.forEach(f => {
@@ -408,6 +409,13 @@ function takeOver() {
     if (!empty(d[t])) continue;
     d[t] = JSON.parse(JSON.stringify(v)); n++;
   }
+  for (const [k, [targets, conv]] of Object.entries(K_CONV)) {
+    if (empty(kd[k])) continue; const val = conv(kd[k]); if (val === undefined) continue;
+    for (const t of [].concat(targets)) { if (!empty(d[t]) && !(typeof d[t] === "object" && !Array.isArray(d[t]) && !d[t].v && !(d[t].lv || []).length)) continue; d[t] = JSON.parse(JSON.stringify(val)); n++; }
+  }
+  if (!d.r_any && R_IDS.some(id => d[id] && d[id].v === "Ja")) d.r_any = "ja";
+  const txt = kd.k_beschreibung ? "Laut Eigentümer: " + kd.k_beschreibung : "";
+  if (txt && !d.beschr_plus) { d.beschr_plus = txt; n++; }
   applyCascade(d); touch(); renderObj();
   toast(n ? n + " Angabe(n) übernommen – bitte prüfen" : "Keine leeren Felder zum Übernehmen");
 }
@@ -421,7 +429,12 @@ function fieldHTML(f, d) {
     case "h": return `<div class="sub">${esc(f.l)}</div>`;
     case "hint": return `<div class="hint">${esc(f.l)}</div>`;
     case "text": return `<label class="fld${f.full ? " full" : ""}"><span>${esc(f.l)}</span><input type="${f.type || "text"}" id="f_${f.id}" data-k="${f.id}" value="${esc(v)}"${f.num ? ' inputmode="decimal"' : ""} autocomplete="off"></label>`;
-    case "area": return `<label class="fld full"><span>${esc(f.l)}</span><textarea id="f_${f.id}" data-k="${f.id}">${esc(v)}</textarea></label>`;
+    case "area": return `<label class="fld full"><span>${esc(f.l)}</span><textarea id="f_${f.id}" data-k="${f.id}"${f.big ? ' class="big"' : ""}>${esc(v)}</textarea></label>`;
+    case "rate": return `<div class="std rate"><h3>${esc(f.l)}</h3>${f.o.map(([w, ex]) => `<button type="button" class="lv" aria-pressed="${v === w}" data-k="${f.id}" data-v="${esc(w)}" data-m="0"><span class="bx"></span><b>${esc(w)}</b><span class="d">${esc(ex)}</span></button>`).join("")}</div>`;
+    case "sign": return `<div class="fld full signbox"><span>Bestätigung</span><p class="signtxt">${esc(f.l)}</p>${v && v.img
+      ? `<div class="signed"><img src="${v.img}" alt="Unterschrift"><div class="signmeta">Unterschrieben ${esc(fmtTime(v.at))}${v.name ? " · " + esc(v.name) : ""}</div><button type="button" class="btn small" data-signclear="${f.id}">Unterschrift löschen und neu unterschreiben</button></div>`
+      : `<canvas class="signpad" data-pad="${f.id}" aria-label="Unterschriftenfeld"></canvas><div class="signhint">Hier mit dem Finger, Stift oder der Maus unterschreiben</div>
+        <div class="signbtns"><button type="button" class="btn" data-signreset="${f.id}">Löschen</button><button type="button" class="btn primary" data-signok="${f.id}">Unterschrift übernehmen</button></div>`}</div>`;
     case "single": case "multi": return `<div class="fld full"><span>${esc(f.l)}</span>${pills(f.id, optsOf(f, d), v, f.t === "multi")}</div>`;
     case "yn": { const y = v || {};
       return `<div class="yn"><div class="q">${esc(f.l)}</div><div class="row"><div class="seg" role="group" aria-label="${esc(f.l)}">${[["Ja", f.good ? "n" : "y"], ["Nein", f.good ? "y" : "n"], ["unbek.", "u"]].map(([l, c]) => `<button type="button" class="${c}" aria-pressed="${y.v === l}" data-yn="${f.id}" data-v="${l}">${l}</button>`).join("")}</div>
@@ -445,6 +458,31 @@ function fieldHTML(f, d) {
   }
   return "";
 }
+
+/* ---------------- Unterschriftenfeld ---------------- */
+function padInit(c) {
+  if (c.dataset.init) return;
+  const r = c.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  const x = c.getContext("2d"); x.scale(dpr, dpr); x.lineWidth = 2.4; x.lineCap = "round"; x.lineJoin = "round"; x.strokeStyle = "#1b2a4a"; x.fillStyle = "#1b2a4a";
+  c.dataset.init = "1";
+}
+function padClear(c) { if (!c) return; const x = c.getContext("2d"); x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height); x.restore(); delete c.dataset.drawn; }
+function padExport(c) {
+  const w = Math.min(600, c.width), h = Math.round(c.height * w / c.width), o = document.createElement("canvas"); o.width = w; o.height = h;
+  const x = o.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, w, h); x.drawImage(c, 0, 0, w, h); return o.toDataURL("image/png");
+}
+const padPos = (c, e) => { const r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+document.addEventListener("pointerdown", e => {
+  const c = e.target.closest && e.target.closest("canvas.signpad"); if (!c) return;
+  padInit(c); e.preventDefault(); try { c.setPointerCapture(e.pointerId); } catch (x) {}
+  const x = c.getContext("2d"), [px, py] = padPos(c, e); x.beginPath(); x.arc(px, py, 1.2, 0, Math.PI * 2); x.fill(); x.beginPath(); x.moveTo(px, py); c._draw = true;
+});
+document.addEventListener("pointermove", e => {
+  const c = e.target.closest && e.target.closest("canvas.signpad"); if (!c || !c._draw) return;
+  const x = c.getContext("2d"), [px, py] = padPos(c, e); x.lineTo(px, py); x.stroke(); x.beginPath(); x.moveTo(px, py); c.dataset.drawn = "1";
+});
+["pointerup", "pointercancel"].forEach(t => document.addEventListener(t, e => { const c = e.target.closest && e.target.closest("canvas.signpad"); if (c) c._draw = false; }));
 
 /* ---------------- Eingaben ---------------- */
 let saveT = null, autoT = null, autoRun = false, editSeq = 0;
@@ -553,10 +591,17 @@ document.addEventListener("click", async e => {
     } else if (ds.m === "1") { const a = new Set(d[ds.k] || []); a.has(ds.v) ? a.delete(ds.v) : a.add(ds.v); d[ds.k] = [...a]; }
     else { d[ds.k] = d[ds.k] === ds.v ? "" : ds.v; val = d[ds.k]; }
     if (DEPENDS.has(ds.k)) { applyCascade(d); touch(); return rerenderKeepScroll(); }
-    b.parentElement.querySelectorAll(".pill").forEach(p => p.setAttribute("aria-pressed", ds.m === "1" ? (d[ds.k] || []).includes(p.dataset.v) : p.dataset.v === val));
+    b.parentElement.querySelectorAll("[data-v]").forEach(p => p.setAttribute("aria-pressed", ds.m === "1" ? (d[ds.k] || []).includes(p.dataset.v) : p.dataset.v === val));
     return touch();
   }
   if (ds.yn) { const y = d[ds.yn] || {}; y.v = y.v === ds.v ? "" : ds.v; d[ds.yn] = y; if (DEPENDS.has(ds.yn)) { touch(); return rerenderKeepScroll(); } b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.v === y.v)); return touch(); }
+  if (ds.signreset) { padClear(document.querySelector(`[data-pad="${ds.signreset}"]`)); return; }
+  if (ds.signok) {
+    const c = document.querySelector(`[data-pad="${ds.signok}"]`);
+    if (!c || !c.dataset.drawn) return toast("Bitte zuerst im Feld unterschreiben.");
+    d[ds.signok] = { img: padExport(c), at: new Date().toISOString(), name: (session.user && session.user.name) || "" }; touch(); toast("Unterschrift gespeichert"); return rerenderKeepScroll();
+  }
+  if (ds.signclear) { delete d[ds.signclear]; touch(); return rerenderKeepScroll(); }
   if (ds.stdall) {
     const n = +ds.stdall; let k = 0;
     SEC().forEach(sec => sec.f.forEach(f => { if (f.t === "std" && vis(f, d) && !((d[f.id] || {}).lv || []).length) { d[f.id] = { ...(d[f.id] || {}), lv: [n] }; k++; } }));
@@ -824,6 +869,7 @@ function protocolFor(sections, d) {
       if (!countable(f) || !vis(f, d) || !filled(f, d)) continue; const v = d[f.id];
       if (f.t === "yn") rows.push([f.l, v.v + (v.n ? " – " + v.n : "")]);
       else if (f.t === "std") rows.push([f.l, "Stufe " + v.lv.join(", ") + (v.n ? " – " + v.n : "")]);
+      else if (f.t === "sign") rows.push(["Unterschrift", "unterschrieben am " + fmtTime(v.at) + (d.k_sign_ort ? " in " + d.k_sign_ort : "") + (v.name ? " von " + v.name : "") + " – " + f.l]);
       else if (f.t === "grid") v.forEach((r, i) => { const t = f.cols.map(([k, l]) => r && r[k] ? l + ": " + r[k] : "").filter(Boolean).join("; "); if (t) rows.push([f.l + " " + (i + 1), t]); });
       else if (f.t === "modern") f.rows.forEach((l, i) => { const r = v[i]; if (r && (r.j || r.u || r.d)) rows.push([l, [r.j, r.u, r.d].filter(Boolean).join(" · ")]); });
       else if (f.t === "docs") visRows(f, d).forEach(i => { const r = v[i]; if (r && r.s) rows.push([f.rows[i], r.s]); });
@@ -945,6 +991,12 @@ function inviteSheet(objectId, title, email) {
   };
 }
 function submitKunde() {
+  if (!(cur.data.k_sign && cur.data.k_sign.img)) {
+    const si = KSECTIONS.findIndex(x => x.id === "k9");
+    sheet(`<h2>Bitte noch unterschreiben</h2><p style="margin:0">Bevor Sie Ihre Angaben übergeben, bestätigen Sie diese bitte mit Ihrer Unterschrift im Abschnitt „Beschreibung & Unterschrift“.</p><button class="btn primary" id="toSign">Zur Unterschrift</button><button class="btn" data-close>Später</button>`);
+    $("#toSign").onclick = () => { closeSheet(); secIdx = si; renderObj(); window.scrollTo(0, document.body.scrollHeight); };
+    return;
+  }
   confirmSheet("Angaben übergeben?", "Ihre Angaben, Fotos und Unterlagen werden an Immobilien Pospiech geschickt. Danach können Sie nichts mehr ändern – für Ergänzungen rufen Sie uns einfach an.", "Jetzt übergeben", async () => {
     await syncNow();
     if (cur.dirty || cur.pendingPhotos) return toast("Bitte zuerst erfolgreich speichern (Internetverbindung prüfen).");
