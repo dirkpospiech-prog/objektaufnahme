@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.11.1";
+const APP_VERSION = "1.12.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -310,7 +310,7 @@ async function checkServerVersion() {
 }
 async function newObject() {
   const o = { id: uid(), created: new Date().toISOString(), updated: new Date().toISOString(), data: { ot_datum: today(), stichtag_art: "aktuell (Ortstermin)" }, photoCount: 0, dirty: true, version: 0, creator: session.user.email };
-  await store.put("objects", o); openObject(o.id, 2);
+  await store.put("objects", o); openObject(o.id, 0);
 }
 async function fetchObject(id) {
   sheet(`<h2>Objekt laden</h2><div class="log" id="slog"><div>Wird vom Server geladen …</div></div><button class="btn" data-close>Schließen</button>`);
@@ -346,22 +346,22 @@ async function openObject(id, sec = "O", refreshOnly = false) {
 }
 
 /* ---------------- Objekt-Ansicht ---------------- */
-/* Eigentümer: fester Ablauf Schritt für Schritt (Über Sie → Immobilie → … → Unterschrift), inkl. Fotos und Unterlagen */
-const kFlow = d => KPHASES.flatMap(p => p.s).map(id => (id === "F" || id === "D") ? id : KSECTIONS.findIndex(x => x.id === id)).filter(x => typeof x === "string" || vis(KSECTIONS[x], d));
+/* Fester Ablauf Schritt für Schritt (erst wer, dann was, dann der Rest), inkl. Fotos und Unterlagen – für Eigentümer und Büro */
+const kFlow = d => PHS().flatMap(p => p.s).map(id => (id === "F" || id === "D") ? id : SEC().findIndex(x => x.id === id)).filter(x => typeof x === "string" || (x >= 0 && vis(SEC()[x], d)));
+const secNum = (i, d) => { const n = kFlow(d || cur.data).filter(x => typeof x === "number"); const k = n.indexOf(i); return k < 0 ? SEC()[i].n : String(k + 1); };
 const stepName = x => x === "F" ? "Fotos" : x === "D" ? "Unterlagen" : SEC()[x].t;
 function flowFoot(here) {
   const fl = kFlow(cur.data), pos = fl.indexOf(here), prev = fl[pos - 1], next = fl[pos + 1];
   return `<div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(stepName(prev))}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
-    ${next !== undefined ? `<button class="btn primary" data-go="${next}">Weiter: ${esc(stepName(next))} ›</button>` : `<button class="btn primary" data-go="O">${cur.locked ? "Zur Übersicht" : "Fertig – zur Übergabe"} ›</button>`}</div>`;
+    ${next !== undefined ? `<button class="btn primary" data-go="${next}">Weiter: ${esc(stepName(next))} ›</button>` : `<button class="btn primary" data-go="O">${!isKunde() || cur.locked ? "Fertig – zur Übersicht" : "Fertig – zur Übergabe"} ›</button>`}</div>`;
 }
 function kNextStep(d) { return kFlow(d).find(x => typeof x === "number" && secProgress(SEC()[x], d) < 100) ?? kFlow(d)[0]; }
 function renderObj() {
   const d = cur.data; const [c, t] = syncState(cur);
   const tabBtn = x => x === "F" ? `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`
     : x === "D" ? `<button data-sec="D" aria-current="${secIdx === "D"}">${ICON.doc}Unterlagen<span class="p">${curFiles.length}</span></button>`
-    : `<button data-sec="${x}" aria-current="${x === secIdx}"><span class="n">${SEC()[x].n}</span>${esc(SEC()[x].t)}<span class="p">${secProgress(SEC()[x], d)}%</span></button>`;
-  const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + (isKunde() ? kFlow(d).map(tabBtn).join("")
-    : SEC().map((s, i) => !vis(s, d) ? "" : tabBtn(i)).join("") + tabBtn("F") + tabBtn("D"))
+    : `<button data-sec="${x}" aria-current="${x === secIdx}"><span class="n">${secNum(x, d)}</span>${esc(SEC()[x].t)}<span class="p">${secProgress(SEC()[x], d)}%</span></button>`;
+  const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + kFlow(d).map(tabBtn).join("")
     + (cur.kunde && !isKunde() ? `<button data-sec="K" aria-current="${secIdx === "K"}">${ICON.user}Eigentümer</button>` : "");
   $("#app").innerHTML = `
   <header class="top"><div class="wrap">
@@ -379,18 +379,18 @@ function renderSection() {
   const m = $("#main");
   const locked = isKunde() && cur.locked;
   const lockWrap = h => locked ? `<div class="msg ok" style="margin-top:14px">Ihre Angaben wurden an Immobilien Pospiech übergeben – vielen Dank! Für Änderungen rufen Sie uns bitte an: 03391 65 92 35 (Neuruppin) oder 033931 34 92 65 (Rheinsberg).</div><fieldset disabled class="fs">${h}</fieldset>` : h;
-  if (secIdx === "F") { m.innerHTML = lockWrap(photosHTML()) + (isKunde() ? flowFoot("F") : ""); bindPhotos(); return; }
+  if (secIdx === "F") { m.innerHTML = lockWrap(photosHTML()) + flowFoot("F"); bindPhotos(); return; }
   if (secIdx === "O") { m.innerHTML = overviewHTML(); return; }
-  if (secIdx === "D") { m.innerHTML = lockWrap(docsHTML()) + (isKunde() ? flowFoot("D") : ""); bindDocs(); return; }
+  if (secIdx === "D") { m.innerHTML = lockWrap(docsHTML()) + flowFoot("D"); bindDocs(); return; }
   if (secIdx === "K") { m.innerHTML = kundeHTML(); return; }
   const d = cur.data, list = visSections(d);
   if (!list.includes(secIdx)) secIdx = list.find(i => i > secIdx) ?? list[list.length - 1];
   const s = SEC()[secIdx], pos = list.indexOf(secIdx), prev = list[pos - 1], next = list[pos + 1];
-  const hint = !known(d) && !s.f.some(f => f.id === "ob_art") && !(isKunde() && secIdx < artSec()) ? `<div class="msg info">Tipp: Erst die <b>${isKunde() ? "Art der Immobilie" : "Objektart"}</b> wählen (Abschnitt ${SEC()[artSec()].n}) – dann erscheinen nur noch die passenden Fragen.</div>` : "";
-  m.innerHTML = lockWrap(`<section class="sec"><div class="sec-head"><span class="num">${s.n}</span><h2>${esc(s.t)}</h2></div>${hint}
+  const fl = kFlow(d), afterArt = fl.indexOf(secIdx) > fl.indexOf(artSec());
+  const hint = !known(d) && afterArt ? `<div class="msg info">Tipp: Erst die <b>${isKunde() ? "Art der Immobilie" : "Objektart"}</b> wählen (Schritt ${secNum(artSec(), d)} „${esc(SEC()[artSec()].t)}“) – dann erscheinen nur noch die passenden Fragen. <button type="button" class="btn small" data-go="${artSec()}" style="margin-top:8px">Zu „${esc(SEC()[artSec()].t)}“</button></div>` : "";
+  m.innerHTML = lockWrap(`<section class="sec"><div class="sec-head"><span class="num">${secNum(secIdx, d)}</span><h2>${esc(s.t)}</h2></div>${hint}
     <div class="grp">${s.f.filter(f => vis(f, d)).map(f => fieldHTML(f, d)).join("")}</div></section>`) + `
-    ${isKunde() ? flowFoot(secIdx) : `<div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SEC()[prev].t)}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
-    ${next !== undefined ? `<button class="btn primary" data-go="${next}">${esc(SEC()[next].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`}`;
+    ${flowFoot(secIdx)}`;
 }
 const artSec = () => SEC().findIndex(s => s.f.some(f => f.id === "ob_art"));
 /* Objekt-Übersicht: alle Abschnitte nach Arbeitsschritten, mit Fortschritt */
@@ -401,11 +401,11 @@ function overviewHTML() {
     if (id === "F") return `<button class="ov-row" data-sec="F"><span class="ov-n">${ICON.cam}</span><span class="ov-t">Fotos</span><span class="ov-p">${curPhotos.length}${pend ? ` · ${pend} neu` : ""}</span></button>`;
     const i = SEC().findIndex(x => x.id === id), s = SEC()[i]; if (!vis(s, d)) return "";
     const p = secProgress(s, d);
-    return `<button class="ov-row" data-sec="${i}"><span class="ov-n">${s.n}</span><span class="ov-t">${esc(s.t)}</span><span class="ov-p${p === 100 ? " done" : ""}">${p === 100 ? "✓" : p + " %"}</span><span class="ov-bar"><i style="width:${p}%"></i></span></button>`;
+    return `<button class="ov-row" data-sec="${i}"><span class="ov-n">${secNum(i, d)}</span><span class="ov-t">${esc(s.t)}</span><span class="ov-p${p === 100 ? " done" : ""}">${p === 100 ? "✓" : p + " %"}</span><span class="ov-bar"><i style="width:${p}%"></i></span></button>`;
   };
   return `<section class="sec">
     ${isKunde() ? (cur.locked ? "" : (() => { const nx = kNextStep(d), started = nx !== kFlow(d)[0]; return `<div class="msg info">${started ? "Schön, dass Sie weitermachen." : "Willkommen! Wir gehen Schritt für Schritt vor: erst ein paar Angaben zu Ihnen, dann zu Ihrer Immobilie."}<button type="button" class="btn primary" data-go="${nx}" style="margin-top:10px;width:100%">${started ? "Weiter mit: " : "Los geht’s: "}${esc(stepName(nx))} ›</button></div>`; })())
-    : !known(d) ? `<div class="msg info">Zuerst die <b>Objektart</b> wählen – dann zeigt die App nur noch die passenden Fragen. <button type="button" class="btn small" data-sec="${artSec()}" style="margin-top:8px">${isKunde() ? "Art der Immobilie" : "Objektart"} wählen</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
+    : !known(d) ? `<div class="msg info">Schritt für Schritt: erst Auftraggeber und Eigentümer, dann das Objekt mit der <b>Objektart</b> – danach zeigt die App nur noch die passenden Fragen.<button type="button" class="btn primary" data-go="${kFlow(d)[0]}" style="margin-top:10px;width:100%">Los geht’s: ${esc(stepName(kFlow(d)[0]))} ›</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
     ${PHS().map(ph => `<div class="ov-group"><h3>${esc(ph.t)}</h3>${ph.s.map(row).join("")}</div>`).join("")}
     ${cur.kunde && !isKunde() ? `<div class="ov-group"><h3>Eigentümer</h3><button class="ov-row" data-sec="K"><span class="ov-n">${ICON.user}</span><span class="ov-t">Angaben des Eigentümers</span><span class="ov-p">${cur.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span></button></div>` : ""}
     <div class="ov-sync"><span class="chip ${c}">${esc(t)}</span>${isKunde() && cur.locked ? "" : `<button type="button" class="btn ${isKunde() ? "" : "primary"}" id="sync2">${ICON.sync}${isKunde() ? "Jetzt speichern" : "Jetzt abgleichen"}</button>`}</div>

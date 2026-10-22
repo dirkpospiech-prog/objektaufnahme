@@ -1,0 +1,47 @@
+import asyncio, subprocess, sys, time, io
+from playwright.async_api import async_playwright
+from PIL import Image
+async def main():
+    mock = subprocess.Popen(["node", "/home/claude/test/gas-mock.js"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    web = subprocess.Popen([sys.executable, "-m", "http.server", "8702", "-d", "/home/claude/repo/app", "-b", "127.0.0.1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.2); shots=[]; errs=[]
+    try:
+        async with async_playwright() as p:
+            br = await p.chromium.launch(); c = await br.new_context(viewport={"width":400,"height":860})
+            await c.add_init_script("localStorage.setItem('apiUrl','http://127.0.0.1:8701/exec')")
+            pg = await c.new_page(); pg.on("pageerror", lambda e: errs.append(str(e)))
+            await pg.goto("http://127.0.0.1:8702/index.html"); await pg.wait_for_timeout(300)
+            await pg.click('[data-tab="register"]'); await pg.fill("#a_name","Dirk"); await pg.fill("#a_email","dirkpospiech@googlemail.com"); await pg.fill("#a_pw","geheim1234"); await pg.click("#authBtn")
+            await pg.wait_for_selector("#newObj"); await pg.click("#newObj"); await pg.wait_for_selector("#secnav"); await pg.click('#secnav [data-sec="1"]'); await pg.wait_for_selector("#secnav")
+            tabs = lambda: pg.eval_on_selector_all("#secnav [data-sec]", "els => els.map(e => e.querySelector('.n') ? e.querySelector('.n').textContent : 'F')")
+            print("ohne Art:", await tabs())
+            await pg.click('[data-k="ob_art"][data-v="Einfamilienhaus"]'); await pg.wait_for_timeout(200)
+            print("EFH:", await tabs())
+            shots.append(await pg.screenshot())
+            await pg.click('[data-sec="2"]'); await pg.wait_for_timeout(100)
+            print("EFH Verfahren:", await pg.eval_on_selector_all('[data-k="verfahren"]', "els => els.map(e => e.dataset.v + (e.getAttribute('aria-pressed')==='true'?'*':''))"))
+            shots.append(await pg.screenshot())
+            await pg.click('[data-sec="7"]'); await pg.wait_for_timeout(100)
+            print("EFH Gebäude: we?", await pg.locator('#f_we').count(), "einlieger?", await pg.locator('[data-k="einlieger"]').count(), "gfl?", await pg.locator('#f_gfl').count())
+            await pg.click('[data-sec="13"]'); await pg.wait_for_timeout(100)
+            print("EFH Nutzung: Mieten-Tabelle?", await pg.locator('[data-g="mieten"]').count())
+            await pg.click('[data-k="nutzung"][data-v="teilweise vermietet"]'); await pg.wait_for_timeout(100)
+            print("EFH teilweise vermietet: Mieten-Tabelle?", await pg.locator('[data-g="mieten"]').count())
+            await pg.click('[data-sec="4"]'); await pg.wait_for_timeout(100)
+            print("EFH Unterlagen:", await pg.locator('.doc').count(), "Zeilen")
+            await pg.click('[data-sec="1"]'); await pg.click('[data-k="ob_art"][data-v="Bauland / unbebaut"]'); await pg.wait_for_timeout(200)
+            print("Bauland:", await tabs())
+            await pg.click('[data-sec="2"]'); await pg.wait_for_timeout(100)
+            print("Bauland Verfahren:", await pg.eval_on_selector_all('[data-k="verfahren"]', "els => els.map(e => e.dataset.v + (e.getAttribute('aria-pressed')==='true'?'*':''))"))
+            await pg.click('[data-sec="1"]'); await pg.click('[data-k="ob_art"][data-v="Mehrfamilienhaus"]'); await pg.wait_for_timeout(200)
+            await pg.click('[data-sec="2"]'); await pg.wait_for_timeout(100)
+            print("MFH:", await tabs(), await pg.eval_on_selector_all('[data-k="verfahren"]', "els => els.map(e => e.dataset.v + (e.getAttribute('aria-pressed')==='true'?'*':''))"))
+            shots.append(await pg.screenshot())
+            print("Fehler:", errs)
+            await br.close()
+    finally:
+        mock.terminate(); web.terminate()
+        ims=[Image.open(io.BytesIO(s)) for s in shots]; w,h=ims[0].size; m=Image.new("RGB",(w*len(ims),h),"white")
+        for i,im in enumerate(ims): m.paste(im,(i*w,0))
+        m.save("/tmp/claude-0/cascade.png")
+asyncio.run(main())

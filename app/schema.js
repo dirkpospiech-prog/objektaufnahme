@@ -5,15 +5,7 @@ const YNg = (id, l) => ({ t: "yn", id, l, good: 1 });   /* „Ja“ ist hier pos
 const T = (id, l, o = {}) => ({ t: "text", id, l, ...o });
 const H = l => ({ t: "h", l });
 const SECTIONS = [
- { id: "s1", n: "1", t: "Anlass & Auftrag", f: [
-  { t: "multi", id: "anlass", l: "Anlass", o: ["Verkauf", "Kauf / Kaufpreisprüfung", "Finanzierung / Beleihung", "Erbschaft / Nachlass", "Schenkung / Übertragung", "Scheidung / Vermögensaufteilung", "Steuerliche Zwecke", "Vermietung / Verpachtung", "Sonstiges"] },
-  T("adressat", "Adressat / Verwendung (Bank, Finanzamt, Gericht …)", { full: 1 }),
-  { t: "single", id: "stichtag_art", l: "Stichtag", o: ["aktuell (Ortstermin)", "zurückliegend (z. B. Todestag)"] },
-  { t: "hint", id: "stichtag_hint", l: "Wertermittlungs- und Qualitätsstichtag = Tag des Ortstermins (Abschnitt 16)." },
-  T("stichtag", "Wertermittlungsstichtag", { type: "date" }), T("qualstichtag", "Qualitätsstichtag (falls abweichend)", { type: "date" }),
-  T("frist", "Gutachten benötigt bis", { type: "date" }), T("auftragsnr", "Auftrags-Nr."),
-  { t: "multi", id: "verfahren", l: "Vorgesehene Verfahren", o: ["Vergleichswertverfahren", "Ertragswertverfahren", "Sachwertverfahren"] } ] },
- { id: "s2", n: "2", t: "Auftraggeber & Eigentum", f: [
+ { id: "s2", n: "1", t: "Auftraggeber & Eigentum", f: [
   H("Auftraggeber/in"), T("ag_name", "Name, Vorname"), T("ag_firma", "Firma"), T("ag_str", "Straße, Hausnummer", { full: 1 }),
   T("ag_plz", "PLZ", { num: 1 }), T("ag_ort", "Ort"), T("ag_tel", "Telefon", { type: "tel" }), T("ag_mail", "E-Mail", { type: "email" }),
   { t: "single", id: "ag_rolle", l: "Auftraggeber/in ist", o: ["Eigentümer/in", "Miteigentümer/in", "Erbe / Erbin", "Bevollmächtigte(r) / Betreuer(in)", "Kaufinteressent/in", "Sonstiges"] },
@@ -21,11 +13,19 @@ const SECTIONS = [
   { t: "single", id: "eig_verh", l: "Eigentumsverhältnis", o: ["Alleineigentum", "Miteigentum nach Bruchteilen", "Eheleute / Lebenspartner", "Erbengemeinschaft", "Gesellschaft (GbR, GmbH …)"] },
   T("eig_anteile", "Beteiligte und Anteile", { full: 1 }),
   H("Erwerb"), T("erw_jahr", "Erwerbsjahr", { num: 1 }), T("erw_art", "Art (Kauf, Erbe, Schenkung, Eigenbau)"), T("erw_preis", "Kaufpreis / Baukosten (€)", { num: 1 }) ] },
- { id: "s3", n: "3", t: "Objekt & Grundbuch", f: [
+ { id: "s3", n: "2", t: "Objekt & Grundbuch", f: [
   { t: "single", id: "ob_art", l: "Objektart – bestimmt, welche Fragen erscheinen", o: ["Einfamilienhaus", "Zweifamilienhaus", "Doppelhaushälfte", "Reihenmittelhaus", "Reihenendhaus", "Mehrfamilienhaus", "Eigentumswohnung", "Wohn- und Geschäftshaus", "Gewerbe / Büro", "Bauland / unbebaut", "Wochenend- / Erholungsgrundstück", "Land- / Forstwirtschaft", "Sonstiges"] },
   T("ob_str", "Straße, Hausnummer", { full: 1 }), T("ob_plz", "PLZ", { num: 1 }), T("ob_ort", "Ort / Ortsteil"),
   H("Grundbuch und Kataster"), T("gb_ag", "Amtsgericht"), T("gb_von", "Grundbuch von"), T("gb_blatt", "Blatt"), T("gb_gem", "Gemarkung"),
   T("gb_flur", "Flur"), T("gb_flst", "Flurstück(e)"), T("gb_bv", "lfd. Nr. Bestandsverzeichnis") ] },
+ { id: "s1", n: "3", t: "Anlass & Auftrag", f: [
+  { t: "multi", id: "anlass", l: "Anlass", o: ["Verkauf", "Kauf / Kaufpreisprüfung", "Finanzierung / Beleihung", "Erbschaft / Nachlass", "Schenkung / Übertragung", "Scheidung / Vermögensaufteilung", "Steuerliche Zwecke", "Vermietung / Verpachtung", "Sonstiges"] },
+  T("adressat", "Adressat / Verwendung (Bank, Finanzamt, Gericht …)", { full: 1 }),
+  { t: "single", id: "stichtag_art", l: "Stichtag", o: ["aktuell (Ortstermin)", "zurückliegend (z. B. Todestag)"] },
+  { t: "hint", id: "stichtag_hint", l: "Wertermittlungs- und Qualitätsstichtag = Tag des Ortstermins (Abschnitt „Ortstermin“)." },
+  T("stichtag", "Wertermittlungsstichtag", { type: "date" }), T("qualstichtag", "Qualitätsstichtag (falls abweichend)", { type: "date" }),
+  T("frist", "Gutachten benötigt bis", { type: "date" }), T("auftragsnr", "Auftrags-Nr."),
+  { t: "multi", id: "verfahren", l: "Vorgesehene Verfahren", o: ["Vergleichswertverfahren", "Ertragswertverfahren", "Sachwertverfahren"] } ] },
  { id: "s4", n: "4", t: "Rechte & Lasten", f: [
   { t: "single", id: "r_any", l: "Gibt es Rechte, Lasten oder Beschränkungen? (Grundbuch Abt. II, Baulasten, Denkmalschutz, Bindungen …)", o: ["keine bekannt", "ja", "unbekannt – noch prüfen"] },
   { t: "hint", id: "r_hint", l: "Bitte jeweils angeben, was zutrifft. Ja = wertrelevanter Umstand vorhanden." },
@@ -36,7 +36,13 @@ const SECTIONS = [
   YN("r_baulast", "Baulasten"), YN("r_nichteingetragen", "Nicht eingetragene Rechte / Nachbarabsprachen"), YN("r_sanierung", "Sanierungs-, Entwicklungs- oder Umlegungsgebiet; offene Ausgleichsbeträge"),
   YN("r_denkmal", "Denkmalschutz"), YN("r_bindung", "Miet- oder Belegungsbindung"), YN("r_sonst", "Sonstige Eintragungen Abt. II"),
   H("Besonderheiten vor 1990"), YN("r_gebeigentum", "Getrenntes Gebäudeeigentum"), YN("r_schuldr", "Nutzungsvertrag nach Schuldrechtsanpassungsgesetz"), YN("r_bodenreform", "Bodenreform / Rückübertragungsansprüche") ] },
- { id: "s5", n: "5", t: "Grundstück & Lage", f: [
+ { id: "s17", n: "5", t: "Unterlagen-Liste", f: [
+  { t: "docs", id: "docs", rows: ["Grundbuchauszug (max. 3 Monate)", "Flurkarte / Liegenschaftskarte", "Baulastenauskunft", "Bauzeichnungen", "Baugenehmigung / Bauakte", "Baubeschreibung, Flächenberechnung", "Energieausweis", "Kauf-/Übergabe-/Schenkungsvertrag", "Nachweise Modernisierungen", "Prüfberichte Heizung / Schornsteinfeger", "Grundsteuerbescheid", "Gebäudeversicherung", "Vorhandene Gutachten", "Mietverträge, Mieterliste, NK-Abrechnung", "Erbbaurechtsvertrag", "Teilungserklärung mit Aufteilungsplan", "Wirtschaftsplan, Hausgeld, Protokolle WEG", "Trinkwasser-/Legionellenprüfung"], o: ["liegt vor", "folgt", "nicht vorhanden", "wir beschaffen"] } ] },
+ { id: "s16", n: "6", t: "Ortstermin", f: [
+  T("ot_datum", "Datum", { type: "date" }), T("ot_zeit", "Uhrzeit"), T("ot_anwesend", "Anwesende Personen", { full: 1 }), T("ot_wetter", "Witterung"), T("ot_zutritt", "Zutritt / Schlüssel"),
+  { t: "multi", id: "ot_besichtigt", l: "Besichtigt", o: ["alle Wohn- und Nutzräume", "Keller", "Dachboden / Spitzboden", "Heizung / Technik", "Nebengebäude / Garage", "Außenanlagen"] },
+  { t: "area", id: "ot_nicht", l: "Nicht besichtigte Bereiche und Gründe" }, { t: "area", id: "ot_eindruck", l: "Eindruck vor Ort" } ] },
+ { id: "s5", n: "7", t: "Grundstück & Lage", f: [
   T("gr_flaeche", "Grundstücksfläche (m²)", { num: 1 }), T("gr_teilflaechen", "Bauland / Garten / sonstige (m²)"),
   { t: "multi", id: "gr_zuschnitt", l: "Zuschnitt", o: ["regelmäßig", "unregelmäßig", "Eckgrundstück", "Hinterlieger"] },
   { t: "single", id: "gr_topo", l: "Topografie", o: ["eben", "leicht hängig", "stark hängig"] },
@@ -46,7 +52,7 @@ const SECTIONS = [
   H("Planungsrecht"), { t: "single", id: "pl_bplan", l: "Planungsrecht", o: ["Bebauungsplan", "§ 34 BauGB (Innenbereich)", "§ 35 BauGB (Außenbereich)", "unbekannt"] },
   T("pl_art", "Art der Nutzung (WA, MI …)"), T("pl_grz", "GRZ", { num: 1 }), T("pl_gfz", "GFZ", { num: 1 }), T("pl_brw", "Bodenrichtwert (€/m²)", { num: 1 }),
   T("gr_grundsteuer", "Grundsteuer (€/Jahr)", { num: 1 }), { t: "area", id: "lage_notiz", l: "Lagebeschreibung (Makro-/Mikrolage, Infrastruktur)" } ] },
- { id: "s6", n: "6", t: "Gebäude", f: [
+ { id: "s6", n: "8", t: "Gebäude", f: [
   T("bj", "Ursprüngliches Baujahr", { num: 1 }), T("bj_anbau", "An-/Umbauten (Art, Jahr)"),
   { t: "single", id: "bj_zeitraum", l: "Falls Baujahr unbekannt", o: ["vor 1900", "1900–1930", "1931–1948", "1949–1967", "1968–1980", "1981–1990", "1991–2000", "2001–2010", "2011–2020", "nach 2020"] },
   H("Bauweise und Dach"),
@@ -66,14 +72,14 @@ const SECTIONS = [
   H("Garagen und Stellplätze"),
   { t: "grid", id: "stellpl", l: "Stellplätze", cols: [["art", "Art (Garage, Carport …)", 1], ["anz", "Anzahl", 0, 1], ["bj", "Baujahr", 0, 1], ["zust", "Bauweise / Zustand", 1]] },
   H("Genehmigungen"), YNg("bg_vorhanden", "Baugenehmigungen für alle Gebäude vorhanden"), YN("bg_ungenehmigt", "Nicht genehmigte An-/Umbauten oder Nutzungsänderungen") ] },
- { id: "s7", n: "7", t: "Eigentumswohnung", f: [
+ { id: "s7", n: "9", t: "Eigentumswohnung", f: [
   { t: "hint", id: "etw_hint", l: "Nur bei Wohnungs- oder Teileigentum." },
   T("etw_nr", "Nr. lt. Aufteilungsplan"), T("etw_mea", "Miteigentumsanteil (z. B. 85/1.000)"), T("etw_lage", "Geschoss / Lage im Haus"), T("etw_einheiten", "Einheiten in der Anlage", { num: 1 }),
   { t: "multi", id: "etw_snr", l: "Sondernutzungsrechte", o: ["Kellerraum", "Stellplatz / Garage", "Garten / Terrasse", "Dachboden / Abstellraum", "Sonstiges"] },
   T("etw_hausgeld", "Hausgeld gesamt (€/Monat)", { num: 1 }), T("etw_ruecklage_mon", "davon Erhaltungsrücklage (€/Monat)", { num: 1 }),
   T("etw_ruecklage", "Erhaltungsrücklage WEG gesamt (€)", { num: 1 }), T("etw_verwalter", "Hausverwaltung"),
   YN("etw_umlage", "Beschlossene Sonderumlagen / größere Maßnahmen"), YN("etw_streit", "Rechtsstreitigkeiten in der WEG") ] },
- { id: "s8", n: "8", t: "Ausstattungsstandard", f: [
+ { id: "s8", n: "10", t: "Ausstattungsstandard", f: [
   { t: "hint", l: "Standardstufen nach ImmoWertV 2021, Anlage 4. Mehrere Stufen ankreuzen, wenn Bauteile unterschiedlich ausgeführt sind." },
   { t: "stdall", id: "st_all", l: "Schnellauswahl: Stufe für alle noch offenen Bauteile übernehmen, danach Abweichungen anpassen" },
   { t: "std", id: "st_wand", l: "Außenwände", o: ["Holzfachwerk, Ziegelmauerwerk; einfacher Putz/Verkleidung; kein oder veralteter Wärmeschutz (vor ca. 1980)", "Mauerwerk z. B. Hohlblock, verputzt oder Holzverkleidung; nicht zeitgemäßer Wärmeschutz (vor ca. 1995)", "Leichtziegel, Kalksandstein, Porenbeton; Edelputz; WDVS oder Wärmedämmputz (nach ca. 1995)", "Verblendmauerwerk zweischalig, hinterlüftete Vorhangfassade; Dämmung nach ca. 2005", "Aufwendige Fassade (Naturstein, Sichtbeton, Glas); Passivhausstandard"] },
@@ -85,7 +91,7 @@ const SECTIONS = [
   { t: "std", id: "st_sanitaer", l: "Sanitär", o: ["Einfaches Bad, Stand-WC, Installation auf Putz", "Ein Bad mit WC, Dusche oder Wanne; teilweise gefliest", "Ein Bad mit WC, Dusche und Wanne; Gäste-WC; raumhoch gefliest", "1–2 Bäder gehoben, bodengleiche Dusche, Doppelwaschtisch", "Mehrere großzügige, hochwertige Bäder"] },
   { t: "std", id: "st_heizung", l: "Heizung", o: ["Einzelöfen, Schwerkraftheizung", "Zentral-/Fernheizung älterer Bauart, Gastherme, Nachtspeicher", "Elektronisch geregelte Zentral-/Fernheizung, NT- oder Brennwertkessel", "Fußbodenheizung, Solarthermie für Warmwasser, Kaminanschluss", "Wärmepumpe, Solar für Heizung, BHKW, Hybridsysteme"] },
   { t: "std", id: "st_elektro", l: "Elektro und Technik", o: ["Sehr wenige Steckdosen, kein FI, Leitungen teils auf Putz", "Wenige Steckdosen, Schalter und Sicherungen", "Zeitgemäße Ausstattung, Zählerschrank mit Unterverteilung", "Zahlreiche Steckdosen, Lüftung mit WRG, Netzwerkanschlüsse", "Video-/Alarmanlage, zentrale Lüftung, Klima, Bussystem"] } ] },
- { id: "s9", n: "9", t: "Modernisierung & Mängel", f: [
+ { id: "s9", n: "11", t: "Modernisierung & Mängel", f: [
   { t: "single", id: "zustand", l: "Gesamtzustand", o: ["Neubau / neuwertig", "kernsaniert", "umfassend modernisiert", "teilweise modernisiert", "überwiegend Ursprungszustand", "sanierungsbedürftig"] },
   T("kernsaniert_jahr", "Kernsanierung im Jahr", { num: 1 }),
   { t: "h", id: "mod_h", l: "Modernisierungen (ImmoWertV Anlage 2)" },
@@ -96,7 +102,7 @@ const SECTIONS = [
   YN("m_holz", "Holzschädlinge / Hausschwamm"), YN("m_sonst", "Sonstige Bauschäden"),
   T("instand", "Instandhaltungsstau / anstehende Maßnahmen", { full: 1 }), T("instand_kosten", "Geschätzte Kosten (€)", { num: 1 }),
   T("rnd", "Restnutzungsdauer (SV-Einschätzung, Jahre)", { num: 1 }) ] },
- { id: "s10", n: "10", t: "Energie & Erschließung", f: [
+ { id: "s10", n: "12", t: "Energie & Erschließung", f: [
   { t: "multi", id: "energie", l: "Energieträger", o: ["Erdgas", "Heizöl", "Flüssiggas", "Wärmepumpe", "Fernwärme", "Pellets / Holz", "Strom (Nachtspeicher)", "Solarthermie", "Sonstiges"] },
   { t: "single", id: "heizsystem", l: "Heizsystem", o: ["Zentralheizung", "Etagenheizung", "Einzelöfen"] },
   { t: "multi", id: "waermevert", l: "Wärmeverteilung", o: ["Heizkörper", "Fußbodenheizung", "Kamin- / Kachelofen"] },
@@ -114,30 +120,24 @@ const SECTIONS = [
   { t: "single", id: "er_gas", l: "Gasnetz", o: ["angeschlossen", "anliegend", "nicht vorhanden"] },
   { t: "single", id: "er_internet", l: "Internet", o: ["Glasfaser", "VDSL / Kabel", "langsames DSL / keiner"] },
   { t: "single", id: "er_tank", l: "Brennstofftank", o: ["keiner", "oberirdisch / Keller", "Erdtank (auch stillgelegt)"] } ] },
- { id: "s11", n: "11", t: "Besondere Bauteile", f: [
+ { id: "s11", n: "13", t: "Besondere Bauteile", f: [
   { t: "hint", l: "Einbauküche, Kamin, Sauna, Pool, Nebengebäude, Werkstatt, Zisterne, Brunnen, Alarmanlage, Markisen …" },
   { t: "grid", id: "bes", l: "Bauteil", cols: [["bez", "Bezeichnung", 1], ["bj", "Baujahr", 0, 1], ["kosten", "Kosten ca. (€)", 0, 1], ["zust", "Zustand / Bemerkung", 1]] } ] },
- { id: "s12", n: "12", t: "Nutzung & Vermietung", f: [
+ { id: "s12", n: "14", t: "Nutzung & Vermietung", f: [
   { t: "multi", id: "nutzung", l: "Nutzung", o: ["eigengenutzt", "teilweise vermietet", "vollständig vermietet", "verpachtet", "leerstehend"] },
   T("leer_seit", "Leerstand seit"),
   H("Miet- und Nutzungseinheiten"),
   { t: "grid", id: "mieten", l: "Einheit", cols: [["einheit", "Einheit / Lage", 0], ["nutz", "Nutzung", 0], ["fl", "Fläche (m²)", 0, 1], ["miete", "Nettokaltmiete (€/Monat)", 0, 1], ["beginn", "Mietbeginn", 0], ["bes", "Staffel / Index / befristet", 0]] },
   YN("v_erhoehung", "Mieterhöhung in den letzten 3 Jahren"), YN("v_rueckstand", "Mietrückstände, Minderungen, Streit"), YN("v_kuendigung", "Kündigungen / bevorstehender Auszug"),
   H("Nicht umlagefähige Kosten"), T("bk_verw", "Verwaltung (€/Jahr)", { num: 1 }), T("bk_inst", "Instandhaltung (€/Jahr)", { num: 1 }), T("bk_sonst", "Sonstige (€/Jahr)", { num: 1 }) ] },
- { id: "s13", n: "13", t: "Schadstoffe & Altlasten", f: [
+ { id: "s13", n: "15", t: "Schadstoffe & Altlasten", f: [
   { t: "single", id: "sch_any", l: "Hinweise auf Schadstoffe oder Altlasten?", o: ["keine bekannt", "ja", "unbekannt – noch prüfen"] },
   YN("sch_asbest", "Asbest (Wellplatten, Fassade, Floor-Flex, Nachtspeicher)"), YN("sch_kmf", "Künstliche Mineralfasern (vor 1996)"), YN("sch_holz", "Holzschutzmittel (PCP, Lindan)"),
   YN("sch_pak", "Teer / PAK (Parkettkleber, Dachpappe)"), YN("sch_blei", "Bleileitungen"), YN("sch_boden", "Altlastenverdacht Boden"), YN("sch_sonst", "Sonstige Schadstoffe") ] },
- { id: "s14", n: "14", t: "Vergleichsverkäufe", f: [
+ { id: "s14", n: "16", t: "Vergleichsverkäufe", f: [
   { t: "grid", id: "vgl", l: "Verkauf", cols: [["adr", "Adresse / Lage", 1], ["art", "Objektart, Größe", 0], ["preis", "Kaufpreis (€)", 0, 1], ["datum", "Datum", 0], ["bes", "Besonderheiten", 1]] } ] },
- { id: "s15", n: "15", t: "Beschreibung", f: [
+ { id: "s15", n: "17", t: "Beschreibung", f: [
   { t: "area", id: "beschr_plus", l: "Besonderheiten / Vorzüge" }, { t: "area", id: "beschr_minus", l: "Nachteile / Mängel" } ] },
- { id: "s16", n: "16", t: "Ortstermin", f: [
-  T("ot_datum", "Datum", { type: "date" }), T("ot_zeit", "Uhrzeit"), T("ot_anwesend", "Anwesende Personen", { full: 1 }), T("ot_wetter", "Witterung"), T("ot_zutritt", "Zutritt / Schlüssel"),
-  { t: "multi", id: "ot_besichtigt", l: "Besichtigt", o: ["alle Wohn- und Nutzräume", "Keller", "Dachboden / Spitzboden", "Heizung / Technik", "Nebengebäude / Garage", "Außenanlagen"] },
-  { t: "area", id: "ot_nicht", l: "Nicht besichtigte Bereiche und Gründe" }, { t: "area", id: "ot_eindruck", l: "Eindruck vor Ort" } ] },
- { id: "s17", n: "17", t: "Unterlagen", f: [
-  { t: "docs", id: "docs", rows: ["Grundbuchauszug (max. 3 Monate)", "Flurkarte / Liegenschaftskarte", "Baulastenauskunft", "Bauzeichnungen", "Baugenehmigung / Bauakte", "Baubeschreibung, Flächenberechnung", "Energieausweis", "Kauf-/Übergabe-/Schenkungsvertrag", "Nachweise Modernisierungen", "Prüfberichte Heizung / Schornsteinfeger", "Grundsteuerbescheid", "Gebäudeversicherung", "Vorhandene Gutachten", "Mietverträge, Mieterliste, NK-Abrechnung", "Erbbaurechtsvertrag", "Teilungserklärung mit Aufteilungsplan", "Wirtschaftsplan, Hausgeld, Protokolle WEG", "Trinkwasser-/Legionellenprüfung"], o: ["liegt vor", "folgt", "nicht vorhanden", "wir beschaffen"] } ] },
  { id: "s18", n: "18", t: "Notizen SV", f: [
   { t: "area", id: "sv_notizen", l: "Notizen" }, { t: "area", id: "sv_offen", l: "Offene Punkte / Nachforderungen" } ] }
 ];
@@ -236,13 +236,13 @@ const OPTIONS = {
   verfahren: VERFAHREN,
   ot_besichtigt: d => bebaut(d) ? ["alle Wohn- und Nutzräume", "Keller", "Dachboden / Spitzboden", "Heizung / Technik", "Nebengebäude / Garage", "Außenanlagen"] : ["Grundstück", "Aufwuchs / Außenanlagen", "Zufahrt / Umgebung"]
 };
-/* Unterlagen: gleiche Reihenfolge wie in Abschnitt 17 (null = immer) */
+/* Unterlagen: gleiche Reihenfolge wie im Abschnitt „Unterlagen“ (null = immer) */
 const DOC_WHEN = [null, null, null, bebaut, bebaut, bebaut, bebaut, null, bebaut, bebaut, null, bebaut, null,
   mietrelevant, d => ja(d, "r_erbbau"), d => only(d, "ETW"), d => only(d, "ETW"), d => only(d, "ERTRAG")];
 
 /* Übersicht: Abschnitte in der Reihenfolge, in der sie meist bearbeitet werden ("F" = Fotos) */
 const PHASES = [
-  { t: "Vorbereitung im Büro", s: ["s1", "s2", "s3", "s4", "s17", "D"] },
+  { t: "Vorbereitung im Büro", s: ["s2", "s3", "s1", "s4", "s17", "D"] },
   { t: "Ortstermin", s: ["s16", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12", "s13", "F"] },
   { t: "Nachbereitung", s: ["s14", "s15", "s18"] }
 ];
