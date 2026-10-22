@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.8.1";
+const APP_VERSION = "1.8.2";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -129,6 +129,7 @@ function syncState(o) {
   if (o.goneOnServer) return ["warn", "Auf dem Server gelöscht – Abgleichen legt es neu an"];
   if (!isKunde() && o.serverNewer && o.serverNewer > (o.version || 0)) return ["warn", "Neuere Fassung auf dem Server – bitte abgleichen"];
   if (!o.version) return ["new", "Noch nicht auf dem Server"];
+  if (isKunde()) return (o.dirty || o.pendingPhotos) ? ["new", "Wird gleich gespeichert …"] : ["ok", "Gespeichert " + fmtTime(o.lastSync)];
   if (o.dirty || o.pendingPhotos) return ["warn", "Änderungen nicht abgeglichen"];
   return ["ok", "Abgeglichen " + fmtTime(o.lastSync)];
 }
@@ -329,6 +330,7 @@ async function openObject(id, sec = "O", refreshOnly = false) {
   if (refreshOnly) return rerenderKeepScroll();
   renderObj(); window.scrollTo(0, 0); go("obj");
   checkServerVersion();
+  if (isKunde() && cur.dirty) kAuto(1500);
 }
 
 /* ---------------- Objekt-Ansicht ---------------- */
@@ -382,9 +384,9 @@ function overviewHTML() {
     ${!known(d) ? `<div class="msg info">Zuerst die <b>Objektart</b> wählen – dann zeigt die App nur noch die passenden Fragen. <button type="button" class="btn small" data-sec="${artSec()}" style="margin-top:8px">${isKunde() ? "Art der Immobilie" : "Objektart"} wählen</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
     ${PHS().map(ph => `<div class="ov-group"><h3>${esc(ph.t)}</h3>${ph.s.map(row).join("")}</div>`).join("")}
     ${cur.kunde && !isKunde() ? `<div class="ov-group"><h3>Eigentümer</h3><button class="ov-row" data-sec="K"><span class="ov-n">${ICON.user}</span><span class="ov-t">Angaben des Eigentümers</span><span class="ov-p">${cur.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span></button></div>` : ""}
-    <div class="ov-sync"><span class="chip ${c}">${esc(t)}</span>${isKunde() && cur.locked ? "" : `<button type="button" class="btn ${isKunde() ? "" : "primary"}" id="sync2">${ICON.sync}${isKunde() ? "Zwischenspeichern" : "Jetzt abgleichen"}</button>`}</div>
+    <div class="ov-sync"><span class="chip ${c}">${esc(t)}</span>${isKunde() && cur.locked ? "" : `<button type="button" class="btn ${isKunde() ? "" : "primary"}" id="sync2">${ICON.sync}${isKunde() ? "Jetzt speichern" : "Jetzt abgleichen"}</button>`}</div>
     ${isKunde() && !cur.locked ? `<button type="button" class="btn primary" id="submitK" style="width:100%">Fertig – an Immobilien Pospiech übergeben</button>` : ""}
-    <p class="foot">${isKunde() ? "Ihre Eingaben werden sofort auf diesem Gerät gespeichert. „Zwischenspeichern“ schickt sie schon jetzt an uns; nach dem Übergeben können Sie nichts mehr ändern." : "Alle Eingaben werden sofort auf diesem Gerät gespeichert. „Abgleichen“ überträgt sie ins Büro."}</p></section>`;
+    <p class="foot">${isKunde() ? "Ihre Eingaben, Fotos und Unterlagen werden automatisch an uns gesendet – Sie können jederzeit aufhören und später (auch an einem anderen Gerät) weitermachen. Erst mit „Übergeben“ wird abgeschlossen; danach können Sie nichts mehr ändern." : "Alle Eingaben werden sofort auf diesem Gerät gespeichert. „Abgleichen“ überträgt sie ins Büro."}</p></section>`;
 }
 function kundeHTML() {
   const kd = cur.kd || {}, rows = protocolFor(KSECTIONS, kd), mine = curPhotos.filter(p => p.by === cur.kunde).length, mineF = curFiles.filter(f => f.by === cur.kunde).length;
@@ -445,11 +447,55 @@ function fieldHTML(f, d) {
 }
 
 /* ---------------- Eingaben ---------------- */
-let saveT = null;
+let saveT = null, autoT = null, autoRun = false, editSeq = 0;
+/* Eigentümer: Eingaben automatisch im Hintergrund an den Server senden (still, ohne Fenster) */
+function kAuto(delay = 4000) {
+  if (!isKunde() || !cur || cur.locked) return;
+  clearTimeout(autoT); autoT = setTimeout(autoSync, delay);
+}
+function setAutoChip(cls, text) { const chip = $("#syncChip"); if (chip) { chip.className = "chip " + cls; chip.textContent = text; } }
+async function autoSync() {
+  autoT = null;
+  if (!isKunde() || !cur || cur.locked) return;
+  if (busy || autoRun) return kAuto(3000);
+  if (!navigator.onLine) { setAutoChip("warn", "Offline – wird gesendet, sobald Internet da ist"); return; }
+  const obj = cur, seq = editSeq; autoRun = true; clearTimeout(saveT);
+  setAutoChip("new", "Wird gespeichert …");
+  try {
+    await store.put("objects", obj);
+    await saveRemote(false);
+    for (const ph of curPhotos.filter(x => !x.fileId && x.blob)) {
+      if (cur !== obj) break;
+      ph.name = ph.name || photoName(ph);
+      const r = await api("uploadPhoto", { objectId: obj.id, name: ph.name, b64: await blobToB64(ph.blob), category: ph.cat, caption: ph.caption || "" });
+      ph.fileId = r.fileId; await store.put("photos", cleanPhoto(ph));
+    }
+    for (const f of curFiles.filter(x => !x.fileId && x.blob)) {
+      if (cur !== obj) break;
+      const r = await api("uploadDoc", { objectId: obj.id, name: f.name, mime: f.mime, docType: fileLabel(f), b64: await blobToB64(f.blob) });
+      f.fileId = r.fileId; await store.put("files", f);
+    }
+    if (cur === obj) {
+      obj.pendingPhotos = curPhotos.some(x => !x.fileId) || curFiles.some(x => !x.fileId);
+      if (curPhotos.length || curFiles.length) await saveRemote(true);
+    }
+    if (editSeq === seq && !obj.pendingPhotos) { obj.dirty = false; obj.serverNewer = 0; }
+    obj.lastSync = new Date().toISOString(); await store.put("objects", obj);
+    if (cur === obj) setAutoChip(obj.dirty ? "new" : "ok", obj.dirty ? "Wird gleich gespeichert …" : "Gespeichert " + fmtTime(obj.lastSync));
+    if (obj.dirty) kAuto(2000);
+  } catch (e) {
+    if (e.code === "locked") { obj.locked = true; obj.kstatus = "übergeben"; await store.put("objects", obj); if (view === "obj" && cur === obj) { const keep = secIdx; renderObj(); secIdx = keep; } }
+    else { setAutoChip("warn", "Noch nicht gesendet – neuer Versuch gleich"); kAuto(30000); }
+  } finally { autoRun = false; }
+}
+window.addEventListener("online", () => { if (cur && cur.dirty) kAuto(500); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && autoT) { clearTimeout(autoT); autoSync(); } });
 function touch() {
+  editSeq++;
   cur.updated = new Date().toISOString(); cur.dirty = true; cur.title = objTitle(cur);
   clearTimeout(saveT); saveT = setTimeout(() => store.put("objects", cur).catch(() => toast("Speichern auf dem Gerät fehlgeschlagen")), 300);
-  const chip = $("#syncChip"); if (chip && cur.version) { chip.className = "chip warn"; chip.textContent = "Änderungen nicht abgeglichen"; }
+  if (isKunde()) { setAutoChip("new", "Wird gleich gespeichert …"); kAuto(); }
+  else { const chip = $("#syncChip"); if (chip && cur.version) { chip.className = "chip warn"; chip.textContent = "Änderungen nicht abgeglichen"; } }
   const t = $("#objTitle"); if (t) t.textContent = objTitle(cur);
   document.querySelectorAll("#secnav [data-sec]").forEach(b => { if (!/^\d+$/.test(b.dataset.sec)) return; const p = b.querySelector(".p"); if (p) p.textContent = secProgress(SEC()[+b.dataset.sec], cur.data) + "%"; });
 }
@@ -609,7 +655,7 @@ async function storeDoc(blob, mime, ext, pages) {
 }
 async function deleteDoc(id) {
   await store.del("files", id); curFiles = curFiles.filter(f => f.id !== id); cur.dirty = true; cur.pendingPhotos = curPhotos.some(p => !p.fileId) || curFiles.some(f => !f.fileId);
-  await store.put("objects", cur); renderObj();
+  await store.put("objects", cur); renderObj(); editSeq++; kAuto(1500);
 }
 function viewDoc(id) {
   const f = curFiles.find(x => x.id === id); if (!f || !f.blob) return;
@@ -692,14 +738,14 @@ async function addPhotos(files) {
       await store.put("photos", p); curPhotos.push(p); }
     catch (e) { toast("Ein Foto konnte nicht gelesen werden."); }
   }
-  cur.photoCount = curPhotos.length; cur.pendingPhotos = true; cur.dirty = true; cur.updated = new Date().toISOString();
-  await store.put("objects", cur); renderObj();
+  cur.photoCount = curPhotos.length; cur.pendingPhotos = true; cur.dirty = true; cur.updated = new Date().toISOString(); editSeq++;
+  await store.put("objects", cur); renderObj(); kAuto(1500);
 }
 async function deletePhoto(id) {
   await store.del("photos", id); curPhotos = curPhotos.filter(p => p.id !== id);
   const u = urls.get(id); if (u) { URL.revokeObjectURL(u); urls.delete(id); }
   cur.photoCount = curPhotos.length; cur.pendingPhotos = curPhotos.some(p => !p.fileId) || curFiles.some(f => !f.fileId); cur.dirty = true;
-  await store.put("objects", cur); renderObj();
+  await store.put("objects", cur); renderObj(); editSeq++; kAuto(1500);
 }
 async function showPhoto(id) {
   const p = curPhotos.find(x => x.id === id); if (!p) return;
