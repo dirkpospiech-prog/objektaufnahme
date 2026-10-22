@@ -28,7 +28,7 @@ const CONFIG = {
 const SHEETS = {
   users: { name: 'Benutzer', head: ['E-Mail', 'Name', 'Status', 'Rolle', 'Beantragt am', 'Freigegeben am', 'Letzter Login', 'Hash', 'Salt'] },
   objects: { name: 'Objekte', head: ['Objekt-ID', 'Bezeichnung', 'Drive-Ordner', 'Angelegt von', 'Zugriff (E-Mails, mit Komma getrennt)', 'Angelegt am', 'Geändert am', 'Geändert von', 'Version', 'Ordner-ID', 'Eigentümer (Kunde)', 'Eigentümer-Status'] },
-  invites: { name: 'Einladungen', head: ['Token-Hash', 'E-Mail', 'Name', 'Objekt-ID', 'Erstellt', 'Gültig bis', 'Eingelöst'] },
+  invites: { name: 'Einladungen', head: ['Token-Hash', 'E-Mail', 'Name', 'Objekt-ID', 'Erstellt', 'Gültig bis', 'Eingelöst', 'Rolle'] },
   sessions: { name: 'Sitzungen', head: ['Token-Hash', 'E-Mail', 'Gültig bis'] },
   log: { name: 'Protokoll', head: ['Zeit', 'E-Mail', 'Aktion', 'Details'] }
 };
@@ -110,7 +110,16 @@ const ROUTES = {
   deleteObject: deleteObject,
   getPhoto: getPhoto,
   // Admin
-  listUsers: function (r) { requireAdmin(r); return { ok: true, users: table(SHEETS.users).rows.map(publicUser) }; },
+  listUsers: function (r) {
+    requireAdmin(r); ensureCols();
+    const now = new Date(), users = table(SHEETS.users).rows;
+    const invites = table(SHEETS.invites).rows.filter(function (x) {
+      return !x.used && (x.role === ROLE.USER || x.role === ROLE.ADMIN) && new Date(x.until) > now && !users.some(function (u) { return u.email === normEmail(x.email); });
+    }).map(function (x) { return { email: normEmail(x.email), name: x.name, role: x.role, until: x.until, created: x.created }; });
+    return { ok: true, users: users.map(publicUser), invites: invites };
+  },
+  inviteStaff: inviteStaff,
+  inviteInfo: inviteInfo,
   setUser: setUser,
   deleteUser: deleteUser,
   resetPassword: resetPassword,
@@ -461,6 +470,9 @@ function ensureCols() {
     const si = book.insertSheet(SHEETS.invites.name);
     si.getRange(1, 1, 1, SHEETS.invites.head.length).setValues([SHEETS.invites.head]).setFontWeight('bold');
     si.hideSheet();
+  } else {
+    const si = book.getSheetByName(SHEETS.invites.name);
+    if (si.getRange(1, 8).getValue() !== 'Rolle') si.getRange(1, 1, 1, SHEETS.invites.head.length).setValues([SHEETS.invites.head]).setFontWeight('bold');
   }
 }
 
@@ -506,6 +518,43 @@ function createInvite(r) {
   });
 }
 
+/** Admin lädt einen Mitarbeiter ein (Rolle Kollege = nutzer oder Admin); der Zugang ist nach dem Einlösen sofort freigegeben */
+function inviteStaff(r) {
+  const admin = requireAdmin(r);
+  const email = normEmail(r.email), name = String(r.name || '').trim().slice(0, 80), role = r.role === ROLE.ADMIN ? ROLE.ADMIN : ROLE.USER;
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('invalid', 'Bitte eine gültige E-Mail-Adresse eingeben.');
+  if (!name) return fail('invalid', 'Bitte den Namen angeben.');
+  ensureCols();
+  const u = findUser(email);
+  if (u && u.role === ROLE.KUNDE) return fail('invalid', 'Diese Adresse gehört zu einem Eigentümer-Zugang.');
+  if (u) return fail('invalid', 'Für diese Adresse gibt es schon einen Zugang (' + u.status + '). Bitte in der Liste freigeben bzw. die Rolle ändern.');
+  const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 8), now = new Date();
+  withLock(function () {
+    const si = sheet(SHEETS.invites);   // ältere, offene Einladungen derselben Adresse ungültig machen
+    table(SHEETS.invites).rows.filter(function (x) { return normEmail(x.email) === email && !x.used; }).forEach(function (x) { si.getRange(x._row, 7).setValue('ersetzt'); });
+    si.appendRow([sha(token), email, name, '', now, new Date(Date.now() + CONFIG.INVITE_DAYS * 864e5), '', role]);
+  });
+  const link = CONFIG.APP_URL + '?einladung=' + token;
+  const apk = 'https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk';
+  const text = 'Hallo ' + name + ',\n\n' + admin.name + ' hat Sie zur Objektaufnahme-App von Immobilien Pospiech eingeladen' + (role === ROLE.ADMIN ? ' – mit Admin-Rechten (Verwaltung von Mitarbeitern, Eigentümern und Objekten).' : '.') + '\n\n' +
+    '1. Öffnen Sie diesen persönlichen Link und legen Sie Ihr Passwort fest (gültig ' + CONFIG.INVITE_DAYS + ' Tage):\n' + link + '\n\n' +
+    '2. Für Ortstermine am Android-Handy installieren Sie danach die App und melden sich mit Ihrer E-Mail-Adresse und dem Passwort an:\n' + apk + '\n' +
+    '   Am PC, iPhone oder Tablet nutzen Sie einfach die Web-Version: ' + CONFIG.APP_URL + '\n\nViele Grüße\nImmobilien Pospiech GbR';
+  let mailed = false;
+  if (r.sendMail !== false) { try { MailApp.sendEmail(email, CONFIG.APP_NAME + ': Einladung', text, { name: 'Immobilien Pospiech' }); mailed = true; } catch (e) { console.warn(e); } }
+  log(admin.email, 'Mitarbeiter eingeladen', email + ' als ' + role);
+  return { ok: true, link: link, mailed: mailed };
+}
+
+/** Öffentlich: was für eine Einladung ist das? (für die Begrüßungsseite) */
+function inviteInfo(r) {
+  ensureCols();
+  const h = sha(String(r.invite || ''));
+  const inv = table(SHEETS.invites).rows.filter(function (x) { return x.tokenHash === h; })[0];
+  if (!inv || inv.used || new Date(inv.until) < new Date()) return fail('invalid', 'Dieser Einladungslink ist ungültig oder abgelaufen.');
+  return { ok: true, role: inv.role === ROLE.ADMIN || inv.role === ROLE.USER ? inv.role : ROLE.KUNDE, name: inv.name };
+}
+
 /** Eigentümer löst die Einladung ein und vergibt ein Passwort */
 function acceptInvite(r) {
   const pw = String(r.password || '');
@@ -514,6 +563,7 @@ function acceptInvite(r) {
   const h = sha(String(r.invite || ''));
   const inv = table(SHEETS.invites).rows.filter(function (x) { return x.tokenHash === h; })[0];
   if (!inv) return fail('invalid', 'Dieser Einladungslink ist ungültig. Bitte wenden Sie sich an Immobilien Pospiech.');
+  if (inv.used === 'ersetzt') return fail('invalid', 'Dieser Link wurde durch eine neuere Einladung ersetzt. Bitte verwenden Sie den Link aus der neuesten E-Mail.');
   if (inv.used) return fail('used', 'Dieser Link wurde bereits verwendet. Bitte melden Sie sich mit Ihrer E-Mail-Adresse und Ihrem Passwort an.');
   if (new Date(inv.until) < new Date()) return fail('expired', 'Dieser Einladungslink ist abgelaufen. Bitte fordern Sie bei Immobilien Pospiech einen neuen an.');
   const email = normEmail(inv.email);
@@ -521,8 +571,10 @@ function acceptInvite(r) {
     const salt = Utilities.getUuid(), now = new Date();
     const u = findUser(email);
     const name = String(r.name || inv.name || '').trim().slice(0, 80) || inv.name;
-    if (u) sheet(SHEETS.users).getRange(u._row, 2, 1, 8).setValues([[name, STATUS.OK, ROLE.KUNDE, u.requestedAt || now, now, '', hashPw(pw, salt), salt]]);
-    else sheet(SHEETS.users).appendRow([email, name, STATUS.OK, ROLE.KUNDE, now, now, '', hashPw(pw, salt), salt]);
+    const role = (inv.role === ROLE.ADMIN || inv.role === ROLE.USER) ? inv.role : ROLE.KUNDE;
+    if (u && u.role !== ROLE.KUNDE && role === ROLE.KUNDE) throw appError('invalid', 'Diese Adresse gehört zu einem Mitarbeiter-Zugang.');
+    if (u) sheet(SHEETS.users).getRange(u._row, 2, 1, 8).setValues([[name, STATUS.OK, role, u.requestedAt || now, now, '', hashPw(pw, salt), salt]]);
+    else sheet(SHEETS.users).appendRow([email, name, STATUS.OK, role, now, now, '', hashPw(pw, salt), salt]);
     sheet(SHEETS.invites).getRange(inv._row, 7).setValue(now);
   });
   log(email, 'Einladung eingelöst', inv.objectId);
@@ -582,7 +634,7 @@ function log(email, action, details) { try { sheet(SHEETS.log).appendRow([new Da
 const FIELDS = {
   'Benutzer': ['email', 'name', 'status', 'role', 'requestedAt', 'approvedAt', 'lastLogin', 'hash', 'salt'],
   'Objekte': ['id', 'title', 'folderUrl', 'creator', 'access', 'created', 'updated', 'updatedBy', 'version', 'folderId', 'kunde', 'kstatus'],
-  'Einladungen': ['tokenHash', 'email', 'name', 'objectId', 'created', 'until', 'used'],
+  'Einladungen': ['tokenHash', 'email', 'name', 'objectId', 'created', 'until', 'used', 'role'],
   'Sitzungen': ['tokenHash', 'email', 'until']
 };
 function table(def) {

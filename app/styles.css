@@ -244,3 +244,10 @@ textarea.big { min-height: 220px; }
 
 .kobj { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
 .sublbl { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+
+.rolepick { display: flex; flex-direction: column; gap: 8px; }
+.rp { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); padding: 10px 12px; cursor: pointer; background: var(--card); }
+.rp input { margin-top: 3px; }
+.rp span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--muted); }
+.rp b { color: var(--ink-strong); font-size: 15px; }
+.rp:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }

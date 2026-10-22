@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.10.0";
+const APP_VERSION = "1.11.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -146,7 +146,7 @@ function renderInvite(token, note = "") {
   $("#app").innerHTML = `<div class="auth">
     <div class="auth-hero"><div class="wrap"><img class="logo" src="logo.png" alt="Immobilien Pospiech">
       <div class="eyebrow">Immobilien Pospiech · Neuruppin & Rheinsberg</div><h1>Willkommen</h1>
-      <p>Hier erfassen Sie die Angaben zu Ihrer Immobilie, Fotos und Unterlagen – in Ruhe und so weit Sie möchten.</p></div></div>
+      <p id="iaIntro">Hier erfassen Sie die Angaben zu Ihrer Immobilie, Fotos und Unterlagen – in Ruhe und so weit Sie möchten.</p></div></div>
     <div class="auth-card"><div class="wrap" style="display:flex;flex-direction:column;gap:14px">${note}
       <form id="invAcc" style="display:flex;flex-direction:column;gap:12px" novalidate>
         <label class="fld"><span>Ihr Name</span><input type="text" id="ia_name" autocomplete="name"></label>
@@ -157,6 +157,12 @@ function renderInvite(token, note = "") {
       <div class="foot">Fragen? Büro Neuruppin 03391 65 92 35 · Büro Rheinsberg 033931 34 92 65</div></div></div></div>`;
   const clear = () => { try { history.replaceState({ v: "root" }, "", location.pathname); } catch (e) {} };
   $("#iaLogin").onclick = () => { clear(); renderAuth(); };
+  api("inviteInfo", { invite: token }).then(r => {
+    if (r.name && !$("#ia_name").value) $("#ia_name").value = r.name;
+    if (r.role !== "kunde") $("#iaIntro").textContent = r.role === "admin"
+      ? "Sie wurden als Admin zur Objektaufnahme-App eingeladen. Legen Sie jetzt Ihr Passwort fest – danach können Sie sofort loslegen."
+      : "Sie wurden als Kollege/Kollegin zur Objektaufnahme-App eingeladen. Legen Sie jetzt Ihr Passwort fest – danach können Sie sofort loslegen.";
+  }).catch(e => { $("#iaMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; });
   $("#invAcc").onsubmit = async ev => {
     ev.preventDefault(); const m = $("#iaMsg"), pw = $("#ia_pw").value;
     if (pw.length < 8) { m.innerHTML = `<div class="msg err">Das Passwort muss mindestens 8 Zeichen lang sein.</div>`; return; }
@@ -961,8 +967,8 @@ async function renderAdmin(tab = "users", push = false) {
   $("#adminBack").onclick = () => history.back();
   document.querySelectorAll("[data-at]").forEach(b => b.onclick = () => renderAdmin(b.dataset.at));
   try {
-    const users = (await api("listUsers")).users;
-    if (tab === "users") return adminUsers(users.filter(u => u.role !== "kunde"));
+    const resp = await api("listUsers"), users = resp.users;
+    if (tab === "users") return adminUsers(users.filter(u => u.role !== "kunde"), resp.invites || []);
     const objs = (await api("listObjects")).objects;
     if (tab === "kunden") return adminKunden(objs, users);
     adminAccess(objs, users.filter(u => u.role !== "kunde"));
@@ -993,25 +999,62 @@ function deleteUserSheet(email, name, extra, back) {
     html: `<p style="margin:0">Der Zugang von <b>${esc(name || email)}</b> (${esc(email)}) wird gelöscht. ${extra}</p><p style="margin:8px 0 0;color:var(--muted)">Das lässt sich nicht rückgängig machen – bei Bedarf einfach neu einladen bzw. neu registrieren lassen.</p>`,
     fn: async () => { await api("deleteUser", { email }); closeSheet(); toast("Zugang gelöscht"); back(); } });
 }
-function adminUsers(users) {
+const ROLE_LBL = r => r === "admin" ? "Admin" : "Kollege";
+function staffInviteSheet(pre = {}) {
+  sheet(`<h2>Mitarbeiter einladen</h2><p style="margin:0">Die Person erhält eine E-Mail mit einem persönlichen Link, legt ihr Passwort selbst fest und kann sofort loslegen – eine Freigabe ist nicht mehr nötig.</p>
+    <form id="siForm" style="display:flex;flex-direction:column;gap:10px" novalidate>
+      <label class="fld"><span>Name</span><input type="text" id="si_name" value="${esc(pre.name || "")}" autocomplete="off"></label>
+      <label class="fld"><span>E-Mail-Adresse</span><input type="email" id="si_mail" value="${esc(pre.email || "")}" autocomplete="off"></label>
+      <div class="fld"><span>Rolle</span><div class="rolepick">
+        <label class="rp"><input type="radio" name="si_role" value="nutzer"${pre.role !== "admin" ? " checked" : ""}><span><b>Kollege</b>Sieht und bearbeitet eigene und ihm zugewiesene Objekte.</span></label>
+        <label class="rp"><input type="radio" name="si_role" value="admin"${pre.role === "admin" ? " checked" : ""}><span><b>Admin</b>Sieht alle Objekte und verwaltet Mitarbeiter, Eigentümer und Objekte (inkl. Löschen).</span></label></div></div>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="si_send" checked> Einladung per E-Mail senden</label>
+      <div id="siMsg"></div><button class="btn primary" type="submit" id="siGo">Einladen</button></form><button class="btn" data-close>Schließen</button>`);
+  $("#siForm").onsubmit = ev => {
+    ev.preventDefault();
+    const name = $("#si_name").value.trim(), email = $("#si_mail").value.trim(), role = (document.querySelector('[name="si_role"]:checked') || {}).value || "nutzer", send = $("#si_send").checked;
+    if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { $("#siMsg").innerHTML = `<div class="msg err">Bitte Name und eine gültige E-Mail-Adresse eingeben.</div>`; return; }
+    controlSheet({ title: "Einladung senden?", label: "Einladen", danger: role === "admin",
+      html: `<p style="margin:0"><b>${esc(name)}</b> (${esc(email)}) wird als <b>${ROLE_LBL(role)}</b> eingeladen.${role === "admin" ? " Admins sehen alle Objekte und können Zugänge und Objekte löschen." : ""}</p>`,
+      fn: async () => {
+        const r = await api("inviteStaff", { name, email, role, sendMail: send });
+        sheet(`<h2>Einladung erstellt</h2><div class="msg ok">${r.mailed ? "Die Einladung wurde per E-Mail an " + esc(email) + " geschickt." : "Einladung erstellt."} Sie können den Link auch selbst weitergeben:</div>
+          <div style="font-size:14px;word-break:break-all;user-select:all;padding:10px;background:var(--sunk)" id="siLink">${esc(r.link)}</div><button type="button" class="btn" id="siCopy">Link kopieren</button><button class="btn" data-close>Fertig</button>`);
+        $("#siCopy").onclick = async () => { try { await navigator.clipboard.writeText(r.link); toast("Link kopiert"); } catch (e) { toast("Bitte den Link markieren und kopieren"); } };
+        if (view === "admin") renderAdmin("users");
+      } });
+  };
+}
+function adminUsers(users, invites = []) {
   const order = { beantragt: 0, freigegeben: 1, gesperrt: 2 };
   users.sort((a, b) => (order[a.status] - order[b.status]) || a.name.localeCompare(b.name));
   const me = session.user.email;
-  $("#adm").innerHTML = `<div class="hint" style="font-style:normal;color:var(--muted)">Mitarbeiter und Kollegen mit Zugang zur App. Eigentümer-Zugänge finden Sie im Reiter „Eigentümer“.</div>` + (users.map(u => `<div class="admin-row"><div class="who"><b>${esc(u.name)}</b><span class="chip ${u.status === "freigegeben" ? "ok" : u.status === "beantragt" ? "warn" : "new"}">${esc(u.status)}${u.role === "admin" ? " · Admin" : ""}</span></div>
+  $("#adm").innerHTML = `<button type="button" class="btn primary" id="newStaff">${ICON.plus}Mitarbeiter einladen</button>
+    <div class="hint" style="font-style:normal;color:var(--muted)">Mitarbeiter und Kollegen mit Zugang zur App. Eigentümer-Zugänge finden Sie im Reiter „Eigentümer“.</div>` +
+    invites.map((v, i) => `<div class="admin-row"><div class="who"><b>${esc(v.name || v.email)}</b><span class="chip warn">Einladung offen · ${ROLE_LBL(v.role)}</span></div>
+      <div style="color:var(--muted);font-size:14px">${esc(v.email)} · eingeladen ${esc(fmtDate(v.created))} · gültig bis ${esc(fmtDate(v.until))}</div>
+      <div class="btns"><button class="btn small" data-inv="re" data-i="${i}">Erneut senden</button><button class="btn small danger" data-inv="del" data-i="${i}">Einladung zurückziehen</button></div></div>`).join("") +
+    (users.map(u => `<div class="admin-row"><div class="who"><b>${esc(u.name)}</b><span class="chip ${u.status === "freigegeben" ? "ok" : u.status === "beantragt" ? "warn" : "new"}">${esc(u.status)} · ${ROLE_LBL(u.role)}</span></div>
     <div style="color:var(--muted);font-size:14px">${esc(u.email)} · beantragt ${esc(fmtDate(u.requestedAt))}${u.lastLogin ? " · zuletzt " + esc(fmtTime(u.lastLogin)) : ""}</div>
     <div class="btns">${u.status !== "freigegeben" ? `<button class="btn small primary" data-act="block" data-e="${esc(u.email)}">Freigeben</button>` : ""}
       ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="block" data-e="${esc(u.email)}">Sperren</button>` : ""}
-      ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="role" data-e="${esc(u.email)}">${u.role === "admin" ? "Admin-Rechte entziehen" : "Zum Admin machen"}</button>` : ""}
+      ${u.email !== me && u.status === "freigegeben" ? `<button class="btn small" data-act="role" data-e="${esc(u.email)}">${u.role === "admin" ? "Rolle: zu Kollege ändern" : "Rolle: zu Admin ändern"}</button>` : ""}
       <button class="btn small" data-act="pw" data-e="${esc(u.email)}">Passwort zurücksetzen</button>
       ${u.email !== me ? `<button class="btn small danger" data-act="del" data-e="${esc(u.email)}">Löschen</button>` : ""}</div></div>`).join("") || `<div class="empty">Noch keine Benutzer.</div>`);
   const back = () => renderAdmin("users");
   $("#adm").onclick = e => {
+    if (e.target.closest("#newStaff")) return staffInviteSheet();
+    const iv = e.target.closest("[data-inv]");
+    if (iv) { const v = invites[+iv.dataset.i]; if (!v) return;
+      if (iv.dataset.inv === "re") return staffInviteSheet(v);
+      return controlSheet({ title: "Einladung zurückziehen?", danger: true, label: "Zurückziehen", html: `<p style="margin:0">Der Einladungslink für <b>${esc(v.email)}</b> wird ungültig.</p>`,
+        fn: async () => { await api("deleteUser", { email: v.email }); closeSheet(); toast("Einladung zurückgezogen"); back(); } }); }
     const b = e.target.closest("[data-act]"); if (!b) return; const u = users.find(x => x.email === b.dataset.e); if (!u) return;
     if (b.dataset.act === "block") return blockSheet(u, back);
     if (b.dataset.act === "pw") return resetPwSheet(u.email, u.name, null);
     if (b.dataset.act === "del") return deleteUserSheet(u.email, u.name, "Er wird aus allen Objektzugriffen entfernt. Objekte, Fotos und Unterlagen, die er angelegt hat, bleiben erhalten.", back);
     if (b.dataset.act === "role") { const toAdmin = u.role !== "admin";
-      controlSheet({ title: toAdmin ? "Zum Admin machen?" : "Admin-Rechte entziehen?", label: toAdmin ? "Zum Admin machen" : "Rechte entziehen", danger: !toAdmin,
+      controlSheet({ title: toAdmin ? "Rolle Admin zuweisen?" : "Rolle Kollege zuweisen?", label: toAdmin ? "Admin zuweisen" : "Kollege zuweisen", danger: !toAdmin,
         html: `<p style="margin:0"><b>${esc(u.name)}</b> ${toAdmin ? "sieht danach alle Objekte und kann Benutzer, Eigentümer und Objekte verwalten und löschen." : "sieht danach nur noch eigene und zugewiesene Objekte."}</p>`,
         fn: async () => { await api("setUser", { email: u.email, role: toAdmin ? "admin" : "nutzer" }); closeSheet(); toast("Gespeichert"); back(); } }); }
   };
