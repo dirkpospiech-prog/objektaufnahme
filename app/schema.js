@@ -247,6 +247,85 @@ const PHASES = [
   { t: "Nachbereitung", s: ["s14", "s15", "s18"] }
 ];
 
+/* =====================================================================
+   VERKAUFS-FRAGEBOGEN FÜR EIGENTÜMER (Kundenzugang)
+   Einfache Sprache; Felder mit gleicher Kennung wie im Aufnahmebogen
+   (z. B. ob_art, nutzung, mod) lassen sich vom SV per Knopf übernehmen.
+   ===================================================================== */
+const KSECTIONS = [
+ { id: "k1", n: "1", t: "Ihr Objekt", f: [
+  { t: "hint", l: "Bitte füllen Sie aus, was Sie wissen. Felder, die Sie nicht kennen, lassen Sie einfach leer – wir klären das gemeinsam." },
+  { t: "single", id: "ob_art", l: "Um welche Art von Immobilie geht es?", o: ["Einfamilienhaus", "Zweifamilienhaus", "Doppelhaushälfte", "Reihenmittelhaus", "Reihenendhaus", "Mehrfamilienhaus", "Eigentumswohnung", "Wohn- und Geschäftshaus", "Gewerbe / Büro", "Bauland / unbebaut", "Wochenend- / Erholungsgrundstück", "Land- / Forstwirtschaft", "Sonstiges"] },
+  T("ob_str", "Straße, Hausnummer", { full: 1 }), T("ob_plz", "PLZ", { num: 1 }), T("ob_ort", "Ort / Ortsteil"),
+  T("k_bj", "Baujahr (ca.)", { num: 1 }), T("k_wfl", "Wohnfläche ca. (m²)", { num: 1 }), T("k_grund", "Grundstücksgröße ca. (m²)", { num: 1 }),
+  T("k_zimmer", "Anzahl Zimmer", { num: 1 }), T("k_baeder", "Anzahl Bäder", { num: 1 }), T("k_etage", "Etage der Wohnung"),
+  { t: "single", id: "k_keller", l: "Keller", o: ["voll unterkellert", "teilweise unterkellert", "kein Keller", "Kellerraum (Wohnung)"] },
+  { t: "single", id: "k_dg", l: "Dachgeschoss", o: ["ausgebaut / bewohnt", "nicht ausgebaut", "kein Dachgeschoss"] },
+  { t: "multi", id: "k_park", l: "Parken", o: ["Garage", "Doppelgarage", "Carport", "Stellplatz im Freien", "Tiefgarage", "keiner"] },
+  { t: "multi", id: "k_extra", l: "Was ist vorhanden?", o: ["Balkon / Loggia", "Terrasse", "Garten", "Wintergarten", "Einbauküche", "Kamin / Kaminofen", "Sauna", "Pool", "Gäste-WC", "Aufzug", "barrierearm", "Nebengebäude / Schuppen"] } ] },
+ { id: "k2", n: "2", t: "Zustand & Modernisierung", f: [
+  { t: "single", id: "k_zustand", l: "Wie würden Sie den Zustand beschreiben?", o: ["neu / neuwertig", "gepflegt", "teilweise renoviert", "renovierungsbedürftig", "sanierungsbedürftig"] },
+  { t: "hint", l: "Was wurde wann erneuert? Ungefähre Jahre genügen." },
+  { t: "modern", id: "mod", rows: ["Dach inkl. Wärmedämmung", "Fenster und Außentüren", "Leitungen (Strom, Gas, Wasser, Abwasser)", "Heizungsanlage", "Wärmedämmung Außenwände", "Bäder", "Innenausbau (Decken, Böden, Treppen)", "Wesentliche Grundrissverbesserung", "Sonstiges"] },
+  { t: "area", id: "k_maengel", l: "Gibt es Mängel oder Schäden, die Sie kennen? (z. B. Feuchtigkeit, Risse, undichtes Dach)" } ] },
+ { id: "k3", n: "3", t: "Heizung & Energie", f: [
+  { t: "multi", id: "energie", l: "Womit wird geheizt?", o: ["Erdgas", "Heizöl", "Flüssiggas", "Wärmepumpe", "Fernwärme", "Pellets / Holz", "Strom (Nachtspeicher)", "Solarthermie", "Sonstiges"] },
+  T("k_heiz_bj", "Baujahr der Heizung (ca.)", { num: 1 }),
+  { t: "multi", id: "pv", l: "Vorhanden", o: ["Photovoltaik", "Batteriespeicher", "Wallbox"] },
+  { t: "single", id: "ea_art", l: "Energieausweis", o: ["Bedarfsausweis", "Verbrauchsausweis", "nicht vorhanden"] },
+  { t: "single", id: "er_abwasser", l: "Abwasser", o: ["öffentlicher Kanal", "Kleinkläranlage", "abflusslose Sammelgrube"] },
+  { t: "single", id: "er_internet", l: "Internet", o: ["Glasfaser", "VDSL / Kabel", "langsames DSL / keiner"] } ] },
+ { id: "k4", n: "4", t: "Nutzung & Kosten", f: [
+  { t: "multi", id: "nutzung", l: "Wie wird die Immobilie genutzt?", o: ["eigengenutzt", "teilweise vermietet", "vollständig vermietet", "verpachtet", "leerstehend"] },
+  { t: "area", id: "k_mieter", l: "Mietverhältnisse (Wohnung/Einheit, Kaltmiete, seit wann)" },
+  T("k_miete", "Mieteinnahmen gesamt (€/Monat, kalt)", { num: 1 }),
+  T("k_hausgeld", "Hausgeld (€/Monat)", { num: 1 }), T("k_ruecklage", "davon Rücklage (€/Monat)", { num: 1 }),
+  T("k_grundsteuer", "Grundsteuer (€/Jahr)", { num: 1 }), T("k_nk", "Nebenkosten ca. (€/Monat)", { num: 1 }) ] },
+ { id: "k5", n: "5", t: "Rechtliches", f: [
+  { t: "single", id: "k_rechte", l: "Gibt es Rechte oder Lasten? (z. B. Wegerecht, Wohnrecht, Erbbaurecht, Denkmalschutz, Baulasten)", o: ["nein", "ja", "weiß ich nicht"] },
+  { t: "area", id: "k_rechte_text", l: "Welche? (kurz beschreiben)" },
+  { t: "single", id: "k_genehmigt", l: "Sind alle Gebäude und Anbauten genehmigt?", o: ["ja", "nein / teilweise", "weiß ich nicht"] },
+  { t: "single", id: "k_eigentum", l: "Wem gehört die Immobilie?", o: ["mir allein", "mehreren Personen (z. B. Ehepaar)", "einer Erbengemeinschaft", "einer Firma"] },
+  { t: "area", id: "k_eigentuemer", l: "Weitere Eigentümer (Name, Anteil)" } ] },
+ { id: "k6", n: "6", t: "Verkauf & Besichtigung", f: [
+  { t: "single", id: "k_frei", l: "Ab wann ist die Immobilie frei?", o: ["sofort", "nach Vereinbarung", "zu einem bestimmten Datum", "bleibt vermietet"] },
+  T("k_frei_datum", "Frei ab", { type: "date" }),
+  T("k_preis", "Ihre Preisvorstellung (€)", { num: 1 }),
+  T("k_tel", "Telefon für Rückfragen", { type: "tel" }),
+  T("k_besicht", "Wann sind Besichtigungen möglich?", { full: 1 }),
+  { t: "area", id: "k_plus", l: "Was gefällt Ihnen besonders an Ihrer Immobilie?" },
+  { t: "area", id: "k_hinweise", l: "Was sollten wir sonst noch wissen?" } ] },
+ { id: "k7", n: "7", t: "Unterlagen-Liste", f: [
+  { t: "hint", l: "Kreuzen Sie an, was Sie haben. Fehlende Unterlagen können wir für Sie besorgen." },
+  { t: "docs", id: "docs", rows: ["Grundbuchauszug", "Flurkarte", "Energieausweis", "Grundrisse / Bauzeichnungen", "Wohnflächenberechnung", "Baubeschreibung", "Baugenehmigung", "Teilungserklärung", "Wirtschaftsplan / Hausgeldabrechnung", "Protokolle Eigentümerversammlungen", "Mietverträge", "Grundsteuerbescheid", "Gebäudeversicherung", "Rechnungen zu Modernisierungen", "Sonstiges"], o: ["habe ich", "besorge ich", "nicht vorhanden", "bitte für mich besorgen"] } ] }
+];
+const KPHASES = [
+  { t: "Ihre Angaben", s: ["k1", "k2", "k3", "k4", "k5"] },
+  { t: "Fotos & Unterlagen", s: ["F", "k7", "D"] },
+  { t: "Verkauf", s: ["k6"] }
+];
+const K_WHEN = {
+  k_etage: d => only(d, "ETW"), k_grund: d => not(d, "ETW"), k_dg: d => not(d, "ETW", "UNBEBAUT"),
+  k_keller: d => not(d, "UNBEBAUT"), k_zimmer: d => not(d, "UNBEBAUT"), k_baeder: d => not(d, "UNBEBAUT"), k_wfl: d => not(d, "UNBEBAUT"), k_bj: d => not(d, "UNBEBAUT"),
+  k_extra: d => not(d, "UNBEBAUT"),
+  k_mieter: vermietet, k_miete: vermietet,
+  k_hausgeld: d => only(d, "ETW"), k_ruecklage: d => only(d, "ETW"),
+  k_rechte_text: d => d.k_rechte === "ja",
+  k_eigentuemer: d => !!d.k_eigentum && d.k_eigentum !== "mir allein",
+  k_frei_datum: d => d.k_frei === "zu einem bestimmten Datum"
+};
+const K_WHEN_SECTION = { k2: bebaut, k3: bebaut };
+const K_DOC_WHEN = [null, null, bebaut, bebaut, bebaut, bebaut, bebaut, d => only(d, "ETW"), d => only(d, "ETW"), d => only(d, "ETW"), vermietet, null, bebaut, bebaut, null];
+["k_rechte", "k_eigentum", "k_frei"].forEach(k => DEPENDS.add(k));
+KSECTIONS.forEach(sec => {
+  if (K_WHEN_SECTION[sec.id]) sec.when = K_WHEN_SECTION[sec.id];
+  sec.f.forEach(f => { if (f.id && K_WHEN[f.id]) f.when = K_WHEN[f.id]; if (f.t === "docs") f.rowWhen = K_DOC_WHEN; });
+});
+/* Übernahme Eigentümer-Angaben → Aufnahmebogen (nur in leere Felder) */
+const K_TO_SV = { ob_art: "ob_art", ob_str: "ob_str", ob_plz: "ob_plz", ob_ort: "ob_ort", k_bj: "bj", k_wfl: "wfl", k_grund: "gr_flaeche", k_zimmer: "zimmer", k_baeder: "baeder",
+  energie: "energie", k_heiz_bj: "wz_bj", pv: "pv", ea_art: "ea_art", er_abwasser: "er_abwasser", er_internet: "er_internet", nutzung: "nutzung",
+  k_grundsteuer: "gr_grundsteuer", k_hausgeld: "etw_hausgeld", k_ruecklage: "etw_ruecklage_mon", mod: "mod" };
+
 SECTIONS.forEach(sec => {
   if (WHEN_SECTION[sec.id]) sec.when = WHEN_SECTION[sec.id];
   sec.f.forEach(f => {

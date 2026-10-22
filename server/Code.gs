@@ -17,6 +17,9 @@ const CONFIG = {
   // Wer neue Zugangsanfragen per E-Mail gemeldet bekommt und beim ersten Login automatisch Admin wird
   ADMIN_EMAIL: 'dirkpospiech@googlemail.com',
   APP_NAME: 'Objektaufnahme Pospiech',
+  // Adresse der Web-App – wird in Einladungen an Eigentümer verwendet
+  APP_URL: 'https://dirkpospiech-prog.github.io/objektaufnahme/',
+  INVITE_DAYS: 30,
   SESSION_DAYS: 60,
   MAX_LOGIN_FAILS: 8,          // danach 15 Minuten Sperre
   HASH_ROUNDS: 400
@@ -24,12 +27,14 @@ const CONFIG = {
 
 const SHEETS = {
   users: { name: 'Benutzer', head: ['E-Mail', 'Name', 'Status', 'Rolle', 'Beantragt am', 'Freigegeben am', 'Letzter Login', 'Hash', 'Salt'] },
-  objects: { name: 'Objekte', head: ['Objekt-ID', 'Bezeichnung', 'Drive-Ordner', 'Angelegt von', 'Zugriff (E-Mails, mit Komma getrennt)', 'Angelegt am', 'Geändert am', 'Geändert von', 'Version', 'Ordner-ID'] },
+  objects: { name: 'Objekte', head: ['Objekt-ID', 'Bezeichnung', 'Drive-Ordner', 'Angelegt von', 'Zugriff (E-Mails, mit Komma getrennt)', 'Angelegt am', 'Geändert am', 'Geändert von', 'Version', 'Ordner-ID', 'Eigentümer (Kunde)', 'Eigentümer-Status'] },
+  invites: { name: 'Einladungen', head: ['Token-Hash', 'E-Mail', 'Name', 'Objekt-ID', 'Erstellt', 'Gültig bis', 'Eingelöst'] },
   sessions: { name: 'Sitzungen', head: ['Token-Hash', 'E-Mail', 'Gültig bis'] },
   log: { name: 'Protokoll', head: ['Zeit', 'E-Mail', 'Aktion', 'Details'] }
 };
 const STATUS = { REQ: 'beantragt', OK: 'freigegeben', BLOCKED: 'gesperrt' };
-const ROLE = { USER: 'nutzer', ADMIN: 'admin' };
+const ROLE = { USER: 'nutzer', ADMIN: 'admin', KUNDE: 'kunde' };
+const KSTATUS = { OPEN: 'offen', DONE: 'übergeben' };
 
 /* ======================= Einrichtung ======================= */
 function setup() {
@@ -55,7 +60,7 @@ function setup() {
 
   const users = ss.getSheetByName(SHEETS.users.name);
   users.getRange('C2:C1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([STATUS.REQ, STATUS.OK, STATUS.BLOCKED], true).build());
-  users.getRange('D2:D1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([ROLE.USER, ROLE.ADMIN], true).build());
+  users.getRange('D2:D1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([ROLE.USER, ROLE.ADMIN, ROLE.KUNDE], true).build());
   users.hideColumns(8, 2);
   users.setColumnWidths(1, 7, 160);
   const objs = ss.getSheetByName(SHEETS.objects.name);
@@ -108,7 +113,11 @@ const ROUTES = {
   listUsers: function (r) { requireAdmin(r); return { ok: true, users: table(SHEETS.users).rows.map(publicUser) }; },
   setUser: setUser,
   resetPassword: resetPassword,
-  setAccess: setAccess
+  setAccess: setAccess,
+  createInvite: createInvite,
+  acceptInvite: acceptInvite,
+  submitKunde: submitKunde,
+  reopenKunde: reopenKunde
 };
 
 /* ======================= Benutzer ======================= */
@@ -181,7 +190,7 @@ function setUser(r) {
       sh.getRange(u._row, 3).setValue(r.status);
       if (r.status === STATUS.OK && !u.approvedAt) sh.getRange(u._row, 6).setValue(new Date());
     }
-    if (r.role && [ROLE.USER, ROLE.ADMIN].indexOf(r.role) >= 0) sh.getRange(u._row, 4).setValue(r.role);
+    if (r.role && [ROLE.USER, ROLE.ADMIN].indexOf(r.role) >= 0 && u.role !== ROLE.KUNDE) sh.getRange(u._row, 4).setValue(r.role);
   });
   if (r.status === STATUS.BLOCKED) deleteSessionsOf(email);
   if (r.status === STATUS.OK && u.status !== STATUS.OK) {
@@ -206,14 +215,21 @@ function resetPassword(r) {
 /* ======================= Objekte ======================= */
 function canAccess(u, o) {
   if (u.role === ROLE.ADMIN) return true;
+  if (u.role === ROLE.KUNDE) return normEmail(o.kunde) === u.email;
   if (o.creator === u.email) return true;
   return splitEmails(o.access).indexOf(u.email) >= 0;
 }
 
 function listObjects(r) {
   const u = auth(r);
-  const list = table(SHEETS.objects).rows.filter(function (o) { return canAccess(u, o); }).map(publicObject);
+  let list = table(SHEETS.objects).rows.filter(function (o) { return canAccess(u, o); }).map(publicObject);
+  if (u.role === ROLE.KUNDE) list = list.map(function (o) { return { id: o.id, title: o.title, version: o.version, updated: o.updated, kunde: o.kunde, kstatus: o.kstatus || KSTATUS.OPEN, creator: 'Immobilien Pospiech', access: [] }; });
   return { ok: true, objects: list };
+}
+
+function readStored(folder) {
+  const f = folder.getFilesByName('aufnahme.json');
+  return f.hasNext() ? JSON.parse(f.next().getBlob().getDataAsString('UTF-8')) : null;
 }
 
 function getObject(r) {
@@ -221,10 +237,16 @@ function getObject(r) {
   const o = findObject(r.id);
   if (!o || !canAccess(u, o)) return fail('not_found', 'Objekt nicht gefunden oder kein Zugriff.');
   const folder = DriveApp.getFolderById(o.folderId);
-  const f = folder.getFilesByName('aufnahme.json');
-  if (!f.hasNext()) return fail('not_found', 'Für dieses Objekt liegen noch keine Daten vor.');
-  const stored = JSON.parse(f.next().getBlob().getDataAsString('UTF-8'));
-  return { ok: true, object: Object.assign(stored, { version: Number(o.version), folderUrl: folder.getUrl(), creator: o.creator, access: splitEmails(o.access) }) };
+  const stored = readStored(folder) || { id: o.id, title: o.title, data: {}, photos: [], files: [] };
+  const kunde = normEmail(o.kunde), locked = o.kstatus === KSTATUS.DONE;
+  if (u.role === ROLE.KUNDE) {
+    // Eigentümer sehen nur ihre eigenen Angaben, Fotos und Unterlagen
+    const mine = function (x) { return normEmail(x.by) === u.email; };
+    return { ok: true, object: { id: stored.id, title: stored.title || o.title, data: stored.kd || {}, photos: (stored.photos || []).filter(mine), files: (stored.files || []).filter(mine),
+      created: stored.created, updated: stored.updated, version: Number(o.version), svVersion: Number(o.version), locked: locked, kunde: kunde, kstatus: o.kstatus || KSTATUS.OPEN } };
+  }
+  return { ok: true, object: Object.assign(stored, { kd: stored.kd || {}, version: Number(o.version), svVersion: Number(stored.svVersion || stored.version || o.version), folderUrl: folder.getUrl(),
+    creator: o.creator, access: splitEmails(o.access), kunde: kunde, kstatus: o.kstatus || '', locked: locked }) };
 }
 
 function saveObject(r) {
@@ -235,12 +257,23 @@ function saveObject(r) {
     let o = findObject(obj.id);
     const now = new Date();
     let folder;
+    const isKunde = u.role === ROLE.KUNDE;
+    if (isKunde && !o) return fail('forbidden', 'Kein Zugriff auf dieses Objekt.');
+    let stored = null;
     if (o) {
       if (!canAccess(u, o)) return fail('forbidden', 'Kein Zugriff auf dieses Objekt.');
-      if (!r.force && Number(r.baseVersion || 0) !== Number(o.version || 0)) {
-        return { ok: false, error: 'conflict', message: 'Das Objekt wurde inzwischen von ' + o.updatedBy + ' geändert.', version: Number(o.version), updatedBy: o.updatedBy, updated: o.updated };
-      }
       folder = DriveApp.getFolderById(o.folderId);
+      stored = readStored(folder);
+      if (isKunde) {
+        if (o.kstatus === KSTATUS.DONE) return fail('locked', 'Ihre Angaben wurden bereits übergeben. Für Änderungen wenden Sie sich bitte an Immobilien Pospiech.');
+      } else {
+        // Konflikte nur bei Änderungen durch Mitarbeiter prüfen – Angaben des Eigentümers werden getrennt geführt
+        const svNow = Number((stored && (stored.svVersion || stored.version)) || o.version || 0);
+        const base = Number(r.baseSv != null ? r.baseSv : (r.baseVersion || 0));
+        if (!r.force && base !== svNow && base !== Number(o.version || 0)) {
+          return { ok: false, error: 'conflict', message: 'Das Objekt wurde inzwischen von ' + o.updatedBy + ' geändert.', version: Number(o.version), updatedBy: o.updatedBy, updated: o.updated };
+        }
+      }
     } else {
       const name = safeName(Utilities.formatDate(now, 'Europe/Berlin', 'yyyy-MM-dd') + ' ' + (obj.title || 'Objekt'));
       folder = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID).createFolder(name);
@@ -249,29 +282,50 @@ function saveObject(r) {
       o = findObject(obj.id);
     }
     const version = Number(o.version || 0) + 1;
-    const content = JSON.stringify({ id: obj.id, title: obj.title || '', data: obj.data || {}, photos: obj.photos || [], files: obj.files || [], created: obj.created || now.toISOString(), updated: now.toISOString(), updatedBy: u.email, version: version });
+    stored = stored || {};
+    const kundeMail = normEmail(o.kunde);
+    const byKunde = function (x) { return kundeMail && normEmail(x.by) === kundeMail; };
+    const ids = function (list) { return (list || []).map(function (x) { return x.id; }); };
+    let rec;
+    if (isKunde) {
+      rec = Object.assign({}, stored, {
+        kd: obj.data || {},
+        photos: (stored.photos || []).filter(function (x) { return !byKunde(x); }).concat((obj.photos || []).filter(byKunde)),
+        files: (stored.files || []).filter(function (x) { return !byKunde(x); }).concat((obj.files || []).filter(byKunde)),
+        kUpdated: now.toISOString(), version: version });
+    } else {
+      const ph = obj.photos || [], fi = obj.files || [];
+      rec = { id: obj.id, title: obj.title || '', data: obj.data || {}, kd: stored.kd || {},
+        photos: ph.concat((stored.photos || []).filter(function (x) { return byKunde(x) && ids(ph).indexOf(x.id) < 0; })),
+        files: fi.concat((stored.files || []).filter(function (x) { return byKunde(x) && ids(fi).indexOf(x.id) < 0; })),
+        created: obj.created || stored.created || now.toISOString(), kUpdated: stored.kUpdated || '',
+        svVersion: Number(stored.svVersion || stored.version || 0) + 1, version: version };
+    }
+    rec.updated = now.toISOString(); rec.updatedBy = u.email;
+    const content = JSON.stringify(rec);
     const it = folder.getFilesByName('aufnahme.json');
     if (it.hasNext()) it.next().setContent(content);
     else folder.createFile('aufnahme.json', content, 'application/json');
-    sheet(SHEETS.objects).getRange(o._row, 2, 1, 1).setValue(obj.title || '');
+    if (!isKunde) sheet(SHEETS.objects).getRange(o._row, 2, 1, 1).setValue(obj.title || '');
     sheet(SHEETS.objects).getRange(o._row, 7, 1, 3).setValues([[now, u.email, version]]);
-    try { writeProtocol(folder, obj, r.protocol || [], u, now); } catch (e) { console.warn('Protokoll: ' + e); }
-    log(u.email, 'Objekt gespeichert', obj.id + ' ' + (obj.title || '') + ' v' + version);
-    return { ok: true, version: version, folderUrl: folder.getUrl() };
+    try { writeProtocol(folder, obj, r.protocol || [], u, now, isKunde ? 'Angaben des Eigentümers' : 'Aufnahmeprotokoll'); } catch (e) { console.warn('Protokoll: ' + e); }
+    log(u.email, isKunde ? 'Eigentümer-Angaben gespeichert' : 'Objekt gespeichert', obj.id + ' ' + (o.title || obj.title || '') + ' v' + version);
+    return { ok: true, version: version, svVersion: rec.svVersion || null, folderUrl: isKunde ? '' : folder.getUrl() };
   });
 }
 
-function writeProtocol(folder, obj, protocol, u, now) {
+function writeProtocol(folder, obj, protocol, u, now, docName) {
+  docName = docName || 'Aufnahmeprotokoll';
   let doc;
-  const it = folder.getFilesByName('Aufnahmeprotokoll');
+  const it = folder.getFilesByName(docName);
   if (it.hasNext()) doc = DocumentApp.openById(it.next().getId());
   else {
-    doc = DocumentApp.create('Aufnahmeprotokoll');
+    doc = DocumentApp.create(docName);
     DriveApp.getFileById(doc.getId()).moveTo(folder);
   }
   const body = doc.getBody();
   body.clear();
-  body.appendParagraph('Aufnahmeprotokoll').setHeading(DocumentApp.ParagraphHeading.TITLE);
+  body.appendParagraph(docName).setHeading(DocumentApp.ParagraphHeading.TITLE);
   body.appendParagraph(obj.title || '').setHeading(DocumentApp.ParagraphHeading.SUBTITLE);
   body.appendParagraph('Stand: ' + Utilities.formatDate(now, 'Europe/Berlin', 'dd.MM.yyyy HH:mm') + ' Uhr · zuletzt bearbeitet von ' + u.name);
   (protocol || []).forEach(function (sec) {
@@ -287,10 +341,13 @@ function writeProtocol(folder, obj, protocol, u, now) {
   doc.saveAndClose();
 }
 
+function kundeLocked(u, o) { return u.role === ROLE.KUNDE && o.kstatus === KSTATUS.DONE; }
+
 function uploadPhoto(r) {
   const u = auth(r);
   const o = findObject(r.objectId);
   if (!o || !canAccess(u, o)) return fail('not_found', 'Objekt nicht gefunden oder kein Zugriff. Bitte zuerst die Aufnahme speichern.');
+  if (kundeLocked(u, o)) return fail('locked', 'Ihre Angaben wurden bereits übergeben.');
   const name = safeName(String(r.name || 'foto.jpg'));
   if (!/\.jpe?g$/i.test(name)) return fail('invalid', 'Nur JPEG-Fotos sind erlaubt.');
   const folder = fotosFolder(o.folderId);
@@ -324,6 +381,7 @@ function uploadDoc(r) {
   const u = auth(r);
   const o = findObject(r.objectId);
   if (!o || !canAccess(u, o)) return fail('not_found', 'Objekt nicht gefunden oder kein Zugriff. Bitte zuerst die Aufnahme speichern.');
+  if (kundeLocked(u, o)) return fail('locked', 'Ihre Angaben wurden bereits übergeben.');
   const name = safeName(String(r.name || 'Unterlage.pdf'));
   const mime = String(r.mime || '');
   if (['application/pdf', 'image/jpeg', 'image/png'].indexOf(mime) < 0) return fail('invalid', 'Nur PDF, JPG oder PNG sind erlaubt.');
@@ -350,6 +408,105 @@ function deleteObject(r) {
     log(admin.email, 'Objekt gelöscht', o.id + ' ' + o.title + ' (Ordner im Papierkorb)');
     return { ok: true };
   });
+}
+
+/* ======================= Eigentümer (Kunden) ======================= */
+function ensureCols() {
+  const sh = sheet(SHEETS.objects);
+  if (sh.getRange(1, 11).getValue() !== SHEETS.objects.head[10]) sh.getRange(1, 1, 1, SHEETS.objects.head.length).setValues([SHEETS.objects.head]);
+  try { sheet(SHEETS.users).getRange('D2:D1000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList([ROLE.USER, ROLE.ADMIN, ROLE.KUNDE], true).build()); } catch (e) {}
+  const book = ss();
+  if (!book.getSheetByName(SHEETS.invites.name)) {
+    const si = book.insertSheet(SHEETS.invites.name);
+    si.getRange(1, 1, 1, SHEETS.invites.head.length).setValues([SHEETS.invites.head]).setFontWeight('bold');
+    si.hideSheet();
+  }
+}
+
+/** Admin lädt einen Eigentümer zu einem Objekt ein (legt das Objekt bei Bedarf an) */
+function createInvite(r) {
+  const admin = requireAdmin(r);
+  const email = normEmail(r.email), name = String(r.name || '').trim().slice(0, 80);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('invalid', 'Bitte eine gültige E-Mail-Adresse des Eigentümers eingeben.');
+  if (!name) return fail('invalid', 'Bitte den Namen des Eigentümers angeben.');
+  ensureCols();
+  const existingUser = findUser(email);
+  if (existingUser && existingUser.role !== ROLE.KUNDE) return fail('invalid', 'Diese Adresse gehört zu einem Mitarbeiter-Zugang.');
+  return withLock(function () {
+    let o = r.objectId ? findObject(r.objectId) : null;
+    const now = new Date();
+    if (!o) {
+      const title = String(r.title || '').trim();
+      if (!title) return fail('invalid', 'Bitte die Adresse des Objekts angeben.');
+      const id = (Date.now().toString(36) + Utilities.getUuid().replace(/-/g, '').slice(0, 9)).toLowerCase();
+      const folder = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID).createFolder(safeName(Utilities.formatDate(now, 'Europe/Berlin', 'yyyy-MM-dd') + ' ' + title));
+      folder.createFolder('Fotos');
+      const rec = { id: id, title: title, data: { ob_str: title, ot_datum: '' }, kd: {}, photos: [], files: [], created: now.toISOString(), updated: now.toISOString(), updatedBy: admin.email, version: 1, svVersion: 1 };
+      folder.createFile('aufnahme.json', JSON.stringify(rec), 'application/json');
+      sheet(SHEETS.objects).appendRow([id, title, folder.getUrl(), admin.email, '', now, now, admin.email, 1, folder.getId(), email, KSTATUS.OPEN]);
+      o = findObject(id);
+    } else {
+      sheet(SHEETS.objects).getRange(o._row, 11, 1, 2).setValues([[email, KSTATUS.OPEN]]);
+    }
+    let link = CONFIG.APP_URL, token = '';
+    if (!existingUser) {
+      token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 8);
+      sheet(SHEETS.invites).appendRow([sha(token), email, name, o.id, now, new Date(Date.now() + CONFIG.INVITE_DAYS * 864e5), '']);
+      link = CONFIG.APP_URL + '?einladung=' + token;
+    }
+    const text = 'Guten Tag ' + name + ',\n\n' +
+      'für Ihre Immobilie (' + (o.title || r.title || '') + ') können Sie die wichtigsten Angaben, Fotos und Unterlagen bequem online an uns übermitteln – am Handy, Tablet oder PC.\n\n' +
+      (existingUser ? 'Melden Sie sich wie gewohnt mit Ihrer E-Mail-Adresse und Ihrem Passwort an:\n' : 'Öffnen Sie dazu diesen persönlichen Link und vergeben Sie ein Passwort (der Link ist ' + CONFIG.INVITE_DAYS + ' Tage gültig):\n') +
+      link + '\n\nBei Fragen erreichen Sie uns im Büro Neuruppin unter 03391 65 92 35 und im Büro Rheinsberg unter 033931 34 92 65.\n\nMit freundlichen Grüßen\nImmobilien Pospiech GbR';
+    let mailed = false;
+    if (r.sendMail !== false) { try { MailApp.sendEmail(email, 'Ihre Objektaufnahme – Immobilien Pospiech', text, { name: 'Immobilien Pospiech' }); mailed = true; } catch (e) { console.warn(e); } }
+    log(admin.email, 'Eigentümer eingeladen', o.id + ': ' + email);
+    return { ok: true, link: link, mailed: mailed, existing: !!existingUser, objectId: o.id };
+  });
+}
+
+/** Eigentümer löst die Einladung ein und vergibt ein Passwort */
+function acceptInvite(r) {
+  const pw = String(r.password || '');
+  if (pw.length < 8) return fail('invalid', 'Das Passwort muss mindestens 8 Zeichen lang sein.');
+  ensureCols();
+  const h = sha(String(r.invite || ''));
+  const inv = table(SHEETS.invites).rows.filter(function (x) { return x.tokenHash === h; })[0];
+  if (!inv) return fail('invalid', 'Dieser Einladungslink ist ungültig. Bitte wenden Sie sich an Immobilien Pospiech.');
+  if (inv.used) return fail('used', 'Dieser Link wurde bereits verwendet. Bitte melden Sie sich mit Ihrer E-Mail-Adresse und Ihrem Passwort an.');
+  if (new Date(inv.until) < new Date()) return fail('expired', 'Dieser Einladungslink ist abgelaufen. Bitte fordern Sie bei Immobilien Pospiech einen neuen an.');
+  const email = normEmail(inv.email);
+  withLock(function () {
+    const salt = Utilities.getUuid(), now = new Date();
+    const u = findUser(email);
+    const name = String(r.name || inv.name || '').trim().slice(0, 80) || inv.name;
+    if (u) sheet(SHEETS.users).getRange(u._row, 2, 1, 8).setValues([[name, STATUS.OK, ROLE.KUNDE, u.requestedAt || now, now, '', hashPw(pw, salt), salt]]);
+    else sheet(SHEETS.users).appendRow([email, name, STATUS.OK, ROLE.KUNDE, now, now, '', hashPw(pw, salt), salt]);
+    sheet(SHEETS.invites).getRange(inv._row, 7).setValue(now);
+  });
+  log(email, 'Einladung eingelöst', inv.objectId);
+  return login({ email: email, password: pw });
+}
+
+/** Eigentümer übergibt seine Angaben – danach nur noch lesen */
+function submitKunde(r) {
+  const u = auth(r);
+  const o = findObject(r.objectId);
+  if (!o || u.role !== ROLE.KUNDE || !canAccess(u, o)) return fail('forbidden', 'Kein Zugriff.');
+  withLock(function () { sheet(SHEETS.objects).getRange(o._row, 12).setValue(KSTATUS.DONE); });
+  try { MailApp.sendEmail(CONFIG.ADMIN_EMAIL, CONFIG.APP_NAME + ': ' + u.name + ' hat die Angaben übergeben', u.name + ' (' + u.email + ') hat die Angaben, Fotos und Unterlagen zu „' + o.title + '“ übergeben.\n\nDrive-Ordner: ' + o.folderUrl); } catch (e) { console.warn(e); }
+  log(u.email, 'Angaben übergeben', o.id);
+  return { ok: true };
+}
+
+/** Admin gibt die Angaben des Eigentümers wieder zur Bearbeitung frei */
+function reopenKunde(r) {
+  const admin = requireAdmin(r);
+  const o = findObject(r.objectId);
+  if (!o) return fail('not_found', 'Objekt nicht gefunden.');
+  withLock(function () { sheet(SHEETS.objects).getRange(o._row, 12).setValue(KSTATUS.OPEN); });
+  log(admin.email, 'Eigentümer-Angaben freigegeben', o.id);
+  return { ok: true };
 }
 
 function setAccess(r) {
@@ -383,7 +540,8 @@ function log(email, action, details) { try { sheet(SHEETS.log).appendRow([new Da
 
 const FIELDS = {
   'Benutzer': ['email', 'name', 'status', 'role', 'requestedAt', 'approvedAt', 'lastLogin', 'hash', 'salt'],
-  'Objekte': ['id', 'title', 'folderUrl', 'creator', 'access', 'created', 'updated', 'updatedBy', 'version', 'folderId'],
+  'Objekte': ['id', 'title', 'folderUrl', 'creator', 'access', 'created', 'updated', 'updatedBy', 'version', 'folderId', 'kunde', 'kstatus'],
+  'Einladungen': ['tokenHash', 'email', 'name', 'objectId', 'created', 'until', 'used'],
   'Sitzungen': ['tokenHash', 'email', 'until']
 };
 function table(def) {
@@ -411,7 +569,7 @@ function publicUser(u) {
   return { email: u.email, name: u.name, status: u.status, role: u.role, requestedAt: d(u.requestedAt), lastLogin: d(u.lastLogin) };
 }
 function publicObject(o) {
-  return { id: String(o.id), title: o.title, creator: o.creator, access: splitEmails(o.access), updated: o.updated instanceof Date ? o.updated.toISOString() : '', updatedBy: o.updatedBy, version: Number(o.version || 0), folderUrl: o.folderUrl };
+  return { id: String(o.id), title: o.title, creator: o.creator, access: splitEmails(o.access), updated: o.updated instanceof Date ? o.updated.toISOString() : '', updatedBy: o.updatedBy, version: Number(o.version || 0), folderUrl: o.folderUrl, kunde: normEmail(o.kunde), kstatus: o.kstatus || '' };
 }
 function auth(r) {
   const token = String(r.token || '');

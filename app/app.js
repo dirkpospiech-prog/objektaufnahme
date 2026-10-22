@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.8.0";
 const APP_BUILD = Number(window.APP_BUILD || 0);            // wird beim App-Bau gesetzt (0 = Web-Version)
 const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const APK_URL = "https://github.com/dirkpospiech-prog/objektaufnahme/releases/latest/download/Objektaufnahme.apk";
@@ -105,14 +105,17 @@ function filled(f, d) {
   if (Array.isArray(v)) return v.length > 0;
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
+const isKunde = () => !!(session && session.user && session.user.role === "kunde");
+const SEC = () => isKunde() ? KSECTIONS : SECTIONS;
+const PHS = () => isKunde() ? KPHASES : PHASES;
 const countable = f => !["h", "hint", "stdall"].includes(f.t);
 const vis = (x, d) => !x.when || x.when(d);
 const optsOf = (f, d) => f.opts ? f.opts(d) : f.o;
-const visSections = d => SECTIONS.map((s, i) => i).filter(i => vis(SECTIONS[i], d));
+const visSections = d => SEC().map((s, i) => i).filter(i => vis(SEC()[i], d));
 const visRows = (f, d) => f.rows.map((l, i) => i).filter(i => !f.rowWhen || !f.rowWhen[i] || f.rowWhen[i](d));
 /* Nach einer Änderung: Auswahlen bereinigen, die es für die neue Objektart nicht mehr gibt, und Verfahren vorbelegen */
 function applyCascade(d) {
-  SECTIONS.forEach(s => s.f.forEach(f => {
+  SEC().forEach(s => s.f.forEach(f => {
     if (!f.opts) return; const o = f.opts(d);
     if (f.t === "multi" && Array.isArray(d[f.id])) d[f.id] = d[f.id].filter(v => o.includes(v));
     if (f.t === "single" && d[f.id] && !o.includes(d[f.id])) d[f.id] = "";
@@ -120,10 +123,11 @@ function applyCascade(d) {
   if (known(d) && (!d.verfahren || !d.verfahren.length)) d.verfahren = [VERFAHREN(d)[0]];
 }
 const secProgress = (s, d) => { const fs = s.f.filter(f => countable(f) && vis(f, d)); return fs.length ? Math.round(100 * fs.filter(f => filled(f, d)).length / fs.length) : 100; };
-function totalProgress(o) { const d = o.data || {}; let a = 0, b = 0; SECTIONS.filter(s => vis(s, d)).forEach(s => s.f.filter(f => countable(f) && vis(f, d)).forEach(f => { b++; if (filled(f, d)) a++; })); return b ? Math.round(100 * a / b) : 0; }
+function totalProgress(o) { const d = o.data || {}; let a = 0, b = 0; SEC().filter(s => vis(s, d)).forEach(s => s.f.filter(f => countable(f) && vis(f, d)).forEach(f => { b++; if (filled(f, d)) a++; })); return b ? Math.round(100 * a / b) : 0; }
 function syncState(o) {
+  if (isKunde() && o.locked) return ["ok", "An Immobilien Pospiech übergeben"];
   if (o.goneOnServer) return ["warn", "Auf dem Server gelöscht – Abgleichen legt es neu an"];
-  if (o.serverNewer && o.serverNewer > (o.version || 0)) return ["warn", "Neuere Fassung auf dem Server – bitte abgleichen"];
+  if (!isKunde() && o.serverNewer && o.serverNewer > (o.version || 0)) return ["warn", "Neuere Fassung auf dem Server – bitte abgleichen"];
   if (!o.version) return ["new", "Noch nicht auf dem Server"];
   if (o.dirty || o.pendingPhotos) return ["warn", "Änderungen nicht abgeglichen"];
   return ["ok", "Abgeglichen " + fmtTime(o.lastSync)];
@@ -135,6 +139,31 @@ window.addEventListener("popstate", () => {
 });
 
 /* ---------------- Anmeldung ---------------- */
+function renderInvite(token, note = "") {
+  view = "auth";
+  $("#app").innerHTML = `<div class="auth">
+    <div class="auth-hero"><div class="wrap"><img class="logo" src="logo.png" alt="Immobilien Pospiech">
+      <div class="eyebrow">Immobilien Pospiech · Neuruppin & Rheinsberg</div><h1>Willkommen</h1>
+      <p>Hier erfassen Sie die Angaben zu Ihrer Immobilie, Fotos und Unterlagen – in Ruhe und so weit Sie möchten.</p></div></div>
+    <div class="auth-card"><div class="wrap" style="display:flex;flex-direction:column;gap:14px">${note}
+      <form id="invAcc" style="display:flex;flex-direction:column;gap:12px" novalidate>
+        <label class="fld"><span>Ihr Name</span><input type="text" id="ia_name" autocomplete="name"></label>
+        <label class="fld"><span>Passwort festlegen (mindestens 8 Zeichen)</span><input type="password" id="ia_pw" autocomplete="new-password"></label>
+        <label class="fld"><span>Passwort wiederholen</span><input type="password" id="ia_pw2" autocomplete="new-password"></label>
+        <div id="iaMsg" aria-live="polite"></div><button class="btn primary" type="submit" id="iaBtn">Zugang einrichten</button></form>
+      <button type="button" class="btn link" id="iaLogin">Ich habe schon ein Passwort – zur Anmeldung</button>
+      <div class="foot">Fragen? Büro Neuruppin 03391 65 92 35 · Büro Rheinsberg 033931 34 92 65</div></div></div></div>`;
+  const clear = () => { try { history.replaceState({ v: "root" }, "", location.pathname); } catch (e) {} };
+  $("#iaLogin").onclick = () => { clear(); renderAuth(); };
+  $("#invAcc").onsubmit = async ev => {
+    ev.preventDefault(); const m = $("#iaMsg"), pw = $("#ia_pw").value;
+    if (pw.length < 8) { m.innerHTML = `<div class="msg err">Das Passwort muss mindestens 8 Zeichen lang sein.</div>`; return; }
+    if (pw !== $("#ia_pw2").value) { m.innerHTML = `<div class="msg err">Die beiden Passwörter stimmen nicht überein.</div>`; return; }
+    $("#iaBtn").disabled = true;
+    try { const r = await api("acceptInvite", { invite: token, name: $("#ia_name").value.trim(), password: pw }); saveSession({ token: r.token, user: r.user }); LS.set("lastEmail", r.user.email); clear(); refreshRemote.at = 0; renderHome(false); }
+    catch (e) { m.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; $("#iaBtn").disabled = false; if (e.code === "used") { clear(); setTimeout(() => renderAuth("login", `<div class="msg info">${esc(e.message)}</div>`), 1500); } }
+  };
+}
 function renderAuth(tab = "login", note = "") {
   view = "auth";
   const needServer = !apiUrl();
@@ -196,7 +225,7 @@ async function renderHome(push = true) {
   const remoteOnly = remote.filter(r => !localIds.has(r.id));
   const card = o => { const [c, t] = syncState(o); const p = totalProgress(o); const d = o.data || {};
     return `<button class="card" data-open="${esc(o.id)}"><div class="t">${esc(objTitle(o))}</div>
-      <div class="meta"><span>${esc(d.ob_art || "Objektart offen")}</span><span>Ortstermin ${esc(fmtDate(d.ot_datum) || "–")}</span><span>${o.photoCount || 0} Fotos</span><span>${p} % erfasst</span></div>
+      <div class="meta"><span>${esc(d.ob_art || "Objektart offen")}</span>${isKunde() ? "" : `<span>Ortstermin ${esc(fmtDate(d.ot_datum) || "–")}</span>`}${o.kunde && !isKunde() ? `<span>Eigentümer: ${o.kstatus === "übergeben" ? "übergeben" : "eingeladen"}</span>` : ""}<span>${o.photoCount || 0} Fotos</span><span>${p} % erfasst</span></div>
       <div class="bar"><i style="width:${p}%"></i></div><div><span class="chip ${c}">${esc(t)}</span></div></button>`; };
   const rcard = r => `<button class="card remote" data-fetch="${esc(r.id)}"><div class="t">${esc(r.title || "Ohne Bezeichnung")}</div>
       <div class="meta"><span>angelegt von ${esc(r.creator)}</span><span>zuletzt ${esc(fmtTime(r.updated))}</span></div>
@@ -207,16 +236,17 @@ async function renderHome(push = true) {
     ${isAdmin() ? `<button class="btn ghost" id="toAdmin">Verwaltung</button>` : ""}
     <button class="btn ghost" id="toAccount" aria-label="Konto">${ICON.user}</button></div></header>
   <main class="wrap">
-    <div class="home-head"><div class="eyebrow">Angemeldet als ${esc(u.name)}</div><h2>Objektaufnahmen</h2></div>
+    <div class="home-head"><div class="eyebrow">Angemeldet als ${esc(u.name)}</div><h2>${isKunde() ? "Ihre Immobilie" : "Objektaufnahmen"}</h2></div>
+    ${isKunde() ? `<div class="msg info">Willkommen! Hier tragen Sie die Angaben zu Ihrer Immobilie ein und laden Fotos und Unterlagen hoch. Alles wird sofort gespeichert – Sie können jederzeit unterbrechen. Wenn Sie fertig sind, tippen Sie in der Übersicht auf <b>„An Immobilien Pospiech übergeben“</b>.</div>` : ""}
     ${STORAGE_OK ? "" : `<div class="msg warn">Dieses Gerät erlaubt kein dauerhaftes Speichern. Bitte nach jeder Aufnahme sofort abgleichen.</div>`}
     ${navigator.onLine ? "" : `<div class="msg info">Offline. Sie können normal weiterarbeiten – alles bleibt auf dem Gerät.</div>`}
     ${updateInfo ? `<div class="msg warn" style="display:flex;flex-direction:column;gap:10px"><div><b>Neue App-Version verfügbar</b> (${esc(updateInfo.name)}). Bitte installieren – Ihre Aufnahmen bleiben erhalten. Vorher nicht abgeglichene Aufnahmen abgleichen.</div><button type="button" class="btn primary" id="getUpdate">Jetzt herunterladen</button><div style="font-size:12px;word-break:break-all;color:var(--muted)">${APK_URL}</div></div>` : ""}
-    <div class="actions"><button class="btn primary" id="newObj">${ICON.plus}Neue Aufnahme</button><button class="btn" id="refresh">${ICON.sync}Aktualisieren</button></div>
+    <div class="actions">${isKunde() ? "" : `<button class="btn primary" id="newObj">${ICON.plus}Neue Aufnahme</button>`}<button class="btn" id="refresh">${ICON.sync}Aktualisieren</button></div>
     <div id="homeMsg"></div>
     <div class="list">
       ${objects.map(card).join("")}
       ${remoteOnly.map(rcard).join("")}
-      ${!objects.length && !remoteOnly.length ? `<div class="empty">Noch keine Aufnahmen.<br>Mit „Neue Aufnahme“ beginnen Sie den Ortstermin.</div>` : ""}
+      ${!objects.length && !remoteOnly.length ? `<div class="empty">${isKunde() ? "Ihre Immobilie wird geladen …<br>Falls hier nichts erscheint, tippen Sie auf „Aktualisieren“." : "Noch keine Aufnahmen.<br>Mit „Neue Aufnahme“ beginnen Sie den Ortstermin."}</div>` : ""}
     </div>
     <div class="foot">Version ${APP_VERSION}${APP_BUILD ? " · Build " + APP_BUILD : " · Web"}</div>
   </main>`;
@@ -233,9 +263,10 @@ async function refreshRemote(silent) {
     const removed = removedIds();
     for (const ro of remote) {
       const lo = await store.get("objects", ro.id);
+      if (lo && ro.kstatus != null && (lo.kstatus !== ro.kstatus || lo.kunde !== ro.kunde)) { lo.kstatus = ro.kstatus; lo.kunde = ro.kunde; lo.locked = ro.kstatus === "übergeben"; await store.put("objects", lo); }
       if (!lo && removed.includes(ro.id)) continue;
       if (lo && (lo.version || 0) >= ro.version) { if (lo.serverNewer) { lo.serverNewer = 0; await store.put("objects", lo); } continue; }
-      if (lo && (lo.dirty || lo.pendingPhotos)) { if (lo.serverNewer !== ro.version) { lo.serverNewer = ro.version; await store.put("objects", lo); } continue; }
+      if (lo && (lo.dirty || lo.pendingPhotos)) { if (!isKunde() && lo.serverNewer !== ro.version) { lo.serverNewer = ro.version; await store.put("objects", lo); } continue; }
       if (cur && cur.id === ro.id) continue;      // gerade geöffnet: dort prüfen
       try { await loadServerObject(ro.id); loaded++; } catch (e) { /* einzelnes Objekt später erneut */ }
     }
@@ -262,6 +293,7 @@ async function checkServerVersion() {
   const id = cur.id;
   try {
     const r = await api("listObjects"); const ro = (r.objects || []).find(x => x.id === id);
+    if (ro && cur && cur.id === id && ro.kstatus != null && (cur.kstatus !== ro.kstatus || cur.kunde !== ro.kunde)) { cur.kstatus = ro.kstatus; cur.kunde = ro.kunde; cur.locked = ro.kstatus === "übergeben"; await store.put("objects", cur); if (view === "obj") rerenderKeepScroll(); }
     if (!ro || !cur || cur.id !== id || ro.version <= (cur.version || 0)) return;
     if (cur.dirty || cur.pendingPhotos) { cur.serverNewer = ro.version; await store.put("objects", cur); toast("Auf dem Server gibt es eine neuere Fassung. Beim Abgleichen wählen Sie, welche gilt."); if (view === "obj") rerenderKeepScroll(); return; }
     await loadServerObject(id);
@@ -285,7 +317,7 @@ async function loadServerObject(id) {
   const localFiles = local ? await store.filesOf(id) : [];
   for (const f of s.files || []) { const lf = localFiles.find(x => x.id === f.id); await store.put("files", { ...f, obj: id, blob: lf ? lf.blob : null }); }
   for (const lf of localFiles) if (lf.fileId && !(s.files || []).some(f => f.id === lf.id)) await store.del("files", lf.id);
-  const o = { id, created: s.created, updated: s.updated, data: s.data || {}, title: s.title, version: s.version, folderUrl: r.object.folderUrl, creator: s.creator, dirty: false, serverNewer: 0, lastSync: new Date().toISOString() };
+  const o = { id, created: s.created, updated: s.updated, data: s.data || {}, kd: s.kd || {}, kUpdated: s.kUpdated || "", svVersion: s.svVersion || s.version, locked: !!s.locked, kunde: s.kunde || "", kstatus: s.kstatus || "", title: s.title, version: s.version, folderUrl: r.object.folderUrl, creator: s.creator, dirty: false, serverNewer: 0, lastSync: new Date().toISOString() };
   const all = await store.photosOf(id), allF = await store.filesOf(id); o.photoCount = all.length; o.pendingPhotos = all.some(p => !p.fileId) || allF.some(f => !f.fileId);
   await store.put("objects", o);
 }
@@ -302,9 +334,10 @@ async function openObject(id, sec = "O", refreshOnly = false) {
 /* ---------------- Objekt-Ansicht ---------------- */
 function renderObj() {
   const d = cur.data; const [c, t] = syncState(cur);
-  const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + SECTIONS.map((s, i) => !vis(s, d) ? "" : `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
+  const tabs = `<button data-sec="O" aria-current="${secIdx === "O"}">Übersicht</button>` + SEC().map((s, i) => !vis(s, d) ? "" : `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
     + `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`
-    + `<button data-sec="D" aria-current="${secIdx === "D"}">${ICON.doc}Unterlagen<span class="p">${curFiles.length}</span></button>`;
+    + `<button data-sec="D" aria-current="${secIdx === "D"}">${ICON.doc}Unterlagen<span class="p">${curFiles.length}</span></button>`
+    + (cur.kunde && !isKunde() ? `<button data-sec="K" aria-current="${secIdx === "K"}">${ICON.user}Eigentümer</button>` : "");
   $("#app").innerHTML = `
   <header class="top"><div class="wrap">
     <button class="btn ghost" id="home" aria-label="Zur Übersicht">${ICON.back}</button>
@@ -319,33 +352,62 @@ function renderObj() {
 }
 function renderSection() {
   const m = $("#main");
-  if (secIdx === "F") { m.innerHTML = photosHTML(); bindPhotos(); return; }
+  const locked = isKunde() && cur.locked;
+  const lockWrap = h => locked ? `<div class="msg ok" style="margin-top:14px">Ihre Angaben wurden an Immobilien Pospiech übergeben – vielen Dank! Für Änderungen rufen Sie uns bitte an: 03391 65 92 35 (Neuruppin) oder 033931 34 92 65 (Rheinsberg).</div><fieldset disabled class="fs">${h}</fieldset>` : h;
+  if (secIdx === "F") { m.innerHTML = lockWrap(photosHTML()); bindPhotos(); return; }
   if (secIdx === "O") { m.innerHTML = overviewHTML(); return; }
-  if (secIdx === "D") { m.innerHTML = docsHTML(); bindDocs(); return; }
+  if (secIdx === "D") { m.innerHTML = lockWrap(docsHTML()); bindDocs(); return; }
+  if (secIdx === "K") { m.innerHTML = kundeHTML(); return; }
   const d = cur.data, list = visSections(d);
   if (!list.includes(secIdx)) secIdx = list.find(i => i > secIdx) ?? list[list.length - 1];
-  const s = SECTIONS[secIdx], pos = list.indexOf(secIdx), prev = list[pos - 1], next = list[pos + 1];
-  const hint = !known(d) && s.id !== "s3" ? `<div class="msg info">Tipp: Erst in Abschnitt 3 die <b>Objektart</b> wählen – dann blendet die App alles aus, was für dieses Objekt nicht gebraucht wird.</div>` : "";
-  m.innerHTML = `<section class="sec"><div class="sec-head"><span class="num">${s.n}</span><h2>${esc(s.t)}</h2></div>${hint}
-    <div class="grp">${s.f.filter(f => vis(f, d)).map(f => fieldHTML(f, d)).join("")}</div></section>
-    <div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SECTIONS[prev].t)}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
-    ${next !== undefined ? `<button class="btn primary" data-go="${next}">${esc(SECTIONS[next].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`;
+  const s = SEC()[secIdx], pos = list.indexOf(secIdx), prev = list[pos - 1], next = list[pos + 1];
+  const hint = !known(d) && !s.f.some(f => f.id === "ob_art") ? `<div class="msg info">Tipp: Erst die <b>${isKunde() ? "Art der Immobilie" : "Objektart"}</b> wählen (Abschnitt ${SEC()[artSec()].n}) – dann erscheinen nur noch die passenden Fragen.</div>` : "";
+  m.innerHTML = lockWrap(`<section class="sec"><div class="sec-head"><span class="num">${s.n}</span><h2>${esc(s.t)}</h2></div>${hint}
+    <div class="grp">${s.f.filter(f => vis(f, d)).map(f => fieldHTML(f, d)).join("")}</div></section>`) + `
+    <div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SEC()[prev].t)}</button>` : `<button class="btn" data-go="O">‹ Übersicht</button>`}
+    ${next !== undefined ? `<button class="btn primary" data-go="${next}">${esc(SEC()[next].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`;
 }
+const artSec = () => SEC().findIndex(s => s.f.some(f => f.id === "ob_art"));
 /* Objekt-Übersicht: alle Abschnitte nach Arbeitsschritten, mit Fortschritt */
 function overviewHTML() {
   const d = cur.data, [c, t] = syncState(cur), pend = curPhotos.filter(p => !p.fileId).length;
   const row = id => {
     if (id === "D") { const pf = curFiles.filter(f => !f.fileId).length; return `<button class="ov-row" data-sec="D"><span class="ov-n">${ICON.doc}</span><span class="ov-t">Unterlagen (Scans, PDFs)</span><span class="ov-p">${curFiles.length}${pf ? ` · ${pf} neu` : ""}</span></button>`; }
     if (id === "F") return `<button class="ov-row" data-sec="F"><span class="ov-n">${ICON.cam}</span><span class="ov-t">Fotos</span><span class="ov-p">${curPhotos.length}${pend ? ` · ${pend} neu` : ""}</span></button>`;
-    const i = SECTIONS.findIndex(x => x.id === id), s = SECTIONS[i]; if (!vis(s, d)) return "";
+    const i = SEC().findIndex(x => x.id === id), s = SEC()[i]; if (!vis(s, d)) return "";
     const p = secProgress(s, d);
     return `<button class="ov-row" data-sec="${i}"><span class="ov-n">${s.n}</span><span class="ov-t">${esc(s.t)}</span><span class="ov-p${p === 100 ? " done" : ""}">${p === 100 ? "✓" : p + " %"}</span><span class="ov-bar"><i style="width:${p}%"></i></span></button>`;
   };
   return `<section class="sec">
-    ${!known(d) ? `<div class="msg info">Zuerst die <b>Objektart</b> wählen – dann zeigt die App nur noch die passenden Fragen. <button type="button" class="btn small" data-sec="2" style="margin-top:8px">Objektart wählen</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
-    ${PHASES.map(ph => `<div class="ov-group"><h3>${esc(ph.t)}</h3>${ph.s.map(row).join("")}</div>`).join("")}
-    <div class="ov-sync"><span class="chip ${c}">${esc(t)}</span><button type="button" class="btn primary" id="sync2">${ICON.sync}Jetzt abgleichen</button></div>
-    <p class="foot">Alle Eingaben werden sofort auf diesem Gerät gespeichert. „Abgleichen“ überträgt sie ins Büro.</p></section>`;
+    ${!known(d) ? `<div class="msg info">Zuerst die <b>Objektart</b> wählen – dann zeigt die App nur noch die passenden Fragen. <button type="button" class="btn small" data-sec="${artSec()}" style="margin-top:8px">${isKunde() ? "Art der Immobilie" : "Objektart"} wählen</button></div>` : `<div class="ov-meta"><b>${esc(d.ob_art)}</b>${d.ot_datum ? " · Ortstermin " + esc(fmtDate(d.ot_datum)) : ""}</div>`}
+    ${PHS().map(ph => `<div class="ov-group"><h3>${esc(ph.t)}</h3>${ph.s.map(row).join("")}</div>`).join("")}
+    ${cur.kunde && !isKunde() ? `<div class="ov-group"><h3>Eigentümer</h3><button class="ov-row" data-sec="K"><span class="ov-n">${ICON.user}</span><span class="ov-t">Angaben des Eigentümers</span><span class="ov-p">${cur.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span></button></div>` : ""}
+    <div class="ov-sync"><span class="chip ${c}">${esc(t)}</span>${isKunde() && cur.locked ? "" : `<button type="button" class="btn ${isKunde() ? "" : "primary"}" id="sync2">${ICON.sync}${isKunde() ? "Zwischenspeichern" : "Jetzt abgleichen"}</button>`}</div>
+    ${isKunde() && !cur.locked ? `<button type="button" class="btn primary" id="submitK" style="width:100%">Fertig – an Immobilien Pospiech übergeben</button>` : ""}
+    <p class="foot">${isKunde() ? "Ihre Eingaben werden sofort auf diesem Gerät gespeichert. „Zwischenspeichern“ schickt sie schon jetzt an uns; nach dem Übergeben können Sie nichts mehr ändern." : "Alle Eingaben werden sofort auf diesem Gerät gespeichert. „Abgleichen“ überträgt sie ins Büro."}</p></section>`;
+}
+function kundeHTML() {
+  const kd = cur.kd || {}, rows = protocolFor(KSECTIONS, kd), mine = curPhotos.filter(p => p.by === cur.kunde).length, mineF = curFiles.filter(f => f.by === cur.kunde).length;
+  return `<section class="sec"><div class="sec-head"><span class="num">E</span><h2>Eigentümer</h2></div>
+    <div class="ov-meta">${esc(cur.kunde)} · <b>${cur.kstatus === "übergeben" ? "Angaben übergeben" : "Eingabe läuft"}</b>${cur.kUpdated ? " · zuletzt gespeichert " + esc(fmtTime(cur.kUpdated)) : ""} · ${mine} Fotos, ${mineF} Unterlagen</div>
+    <div class="actions stack" style="padding:0">
+      <button type="button" class="btn primary" id="kTake">Angaben in die Aufnahme übernehmen (nur leere Felder)</button>
+      ${isAdmin() && cur.kstatus === "übergeben" ? `<button type="button" class="btn" id="kReopen">Wieder zur Bearbeitung freigeben</button>` : ""}
+      ${isAdmin() ? `<button type="button" class="btn" id="kInvite">Einladung erneut senden</button>` : ""}</div>
+    ${rows.length ? rows.map(sec => `<div class="kblock"><h3>${esc(sec.title)}</h3>${sec.rows.map(([a, b]) => `<div class="krow"><span>${esc(a)}</span><b>${esc(b).replace(/\n/g, "<br>")}</b></div>`).join("")}</div>`).join("") : `<div class="empty">Der Eigentümer hat noch nichts eingetragen.</div>`}
+    <p class="foot">Fotos und Unterlagen des Eigentümers finden Sie in den Reitern „Fotos“ und „Unterlagen“ (gekennzeichnet mit „Eigentümer“).</p></section>`;
+}
+function takeOver() {
+  const kd = cur.kd || {}, d = cur.data; let n = 0;
+  const empty = v => v == null || v === "" || (Array.isArray(v) && !v.length) || (typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length);
+  for (const [k, t] of Object.entries(K_TO_SV)) {
+    const v = kd[k]; if (empty(v)) continue;
+    if (k === "mod") { const m = d.mod || {}; for (const [ri, r] of Object.entries(v)) { if (r && (r.j || r.u || r.d) && !(m[ri] && (m[ri].j || m[ri].u || m[ri].d))) { m[ri] = { ...r }; n++; } } d.mod = m; continue; }
+    if (!empty(d[t])) continue;
+    d[t] = JSON.parse(JSON.stringify(v)); n++;
+  }
+  applyCascade(d); touch(); renderObj();
+  toast(n ? n + " Angabe(n) übernommen – bitte prüfen" : "Keine leeren Felder zum Übernehmen");
 }
 function pills(id, opts, val, multi) {
   return `<div class="pills" role="group">${opts.map(o => { const on = multi ? (val || []).includes(o) : val === o;
@@ -376,7 +438,7 @@ function fieldHTML(f, d) {
         <div class="fld"><span>Umfang</span>${pills("mod:" + ri, ["vollständig", "teilweise"], r.u, false)}</div>
         <label class="fld full"><span>Details / Kosten</span><input type="text" id="f_mod_${ri}_d" data-mod="${ri}" data-c="d" value="${esc(r.d)}"></label></div>`; }).join("")}</div>`; }
     case "docs": { const dv = v || {};
-      const cnt = ri => curFiles.filter(x => x.docRow === ri).length;
+      const cnt = ri => curFiles.filter(x => x.docRow === ri && (isKunde() || !cur.kunde || x.by !== cur.kunde)).length;
       return `<div class="doc" style="border:0"><button type="button" class="btn" data-sec="D">${ICON.doc}Unterlagen scannen oder als Datei anhängen</button></div>` + visRows(f, d).map(ri => `<div class="doc"><div>${esc(f.rows[ri])}${cnt(ri) ? ` <span class="chip ok">${cnt(ri)} Datei${cnt(ri) > 1 ? "en" : ""}</span>` : ""}</div>${pills("doc:" + ri, f.o, (dv[ri] || {}).s, false)}</div>`).join(""); }
   }
   return "";
@@ -389,7 +451,7 @@ function touch() {
   clearTimeout(saveT); saveT = setTimeout(() => store.put("objects", cur).catch(() => toast("Speichern auf dem Gerät fehlgeschlagen")), 300);
   const chip = $("#syncChip"); if (chip && cur.version) { chip.className = "chip warn"; chip.textContent = "Änderungen nicht abgeglichen"; }
   const t = $("#objTitle"); if (t) t.textContent = objTitle(cur);
-  document.querySelectorAll("#secnav [data-sec]").forEach(b => { if (!/^\d+$/.test(b.dataset.sec)) return; const p = b.querySelector(".p"); if (p) p.textContent = secProgress(SECTIONS[+b.dataset.sec], cur.data) + "%"; });
+  document.querySelectorAll("#secnav [data-sec]").forEach(b => { if (!/^\d+$/.test(b.dataset.sec)) return; const p = b.querySelector(".p"); if (p) p.textContent = secProgress(SEC()[+b.dataset.sec], cur.data) + "%"; });
 }
 document.addEventListener("change", e => {
   if (view === "obj" && e.target.dataset && e.target.dataset.k && DEPENDS.has(e.target.dataset.k) && e.target.tagName === "INPUT") rerenderKeepScroll();
@@ -417,6 +479,10 @@ document.addEventListener("click", async e => {
   if (b.id === "refresh") return refreshRemote(false);
   if (b.id === "getUpdate") { window.location.href = APK_URL; return; }
   if (b.id === "camBtn") return takeNativePhoto();
+  if (b.id === "submitK") return submitKunde();
+  if (b.id === "kTake") return takeOver();
+  if (b.id === "kReopen") return reopenKunde();
+  if (b.id === "kInvite") return inviteSheet(cur.id, objTitle(cur), cur.kunde);
   if (b.id === "scanBtn" || b.id === "scanMore") return scanPage();
   if (b.id === "scanDone") return finishScan();
   if (b.id === "scanCancel") { scanPages = []; return renderSection(); }
@@ -431,7 +497,7 @@ document.addEventListener("click", async e => {
   if (b.id === "home") { clearTimeout(saveT); await store.put("objects", cur); return history.back(); }
   if (b.id === "sync" || b.id === "sync2") return syncNow();
   if (b.id === "menu") return objMenu();
-  if (ds.sec !== undefined || ds.go !== undefined) { const v = ds.sec ?? ds.go; secIdx = ["F", "O", "D"].includes(v) ? v : +v; renderObj(); window.scrollTo(0, 0); return; }
+  if (ds.sec !== undefined || ds.go !== undefined) { const v = ds.sec ?? ds.go; secIdx = ["F", "O", "D", "K"].includes(v) ? v : +v; renderObj(); window.scrollTo(0, 0); return; }
   if (ds.k && ds.v !== undefined) {
     let val;
     if (ds.k.startsWith("mod:") || ds.k.startsWith("doc:")) {
@@ -446,7 +512,7 @@ document.addEventListener("click", async e => {
   if (ds.yn) { const y = d[ds.yn] || {}; y.v = y.v === ds.v ? "" : ds.v; d[ds.yn] = y; if (DEPENDS.has(ds.yn)) { touch(); return rerenderKeepScroll(); } b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.v === y.v)); return touch(); }
   if (ds.stdall) {
     const n = +ds.stdall; let k = 0;
-    SECTIONS.forEach(sec => sec.f.forEach(f => { if (f.t === "std" && vis(f, d) && !((d[f.id] || {}).lv || []).length) { d[f.id] = { ...(d[f.id] || {}), lv: [n] }; k++; } }));
+    SEC().forEach(sec => sec.f.forEach(f => { if (f.t === "std" && vis(f, d) && !((d[f.id] || {}).lv || []).length) { d[f.id] = { ...(d[f.id] || {}), lv: [n] }; k++; } }));
     touch(); rerenderKeepScroll(); return toast(k ? `Stufe ${n} für ${k} Bauteil(e) übernommen` : "Alle Bauteile sind bereits eingestuft");
   }
   if (ds.std) { const st = d[ds.std] || {}; const lv = new Set(st.lv || []); const n = +ds.v; lv.has(n) ? lv.delete(n) : lv.add(n); st.lv = [...lv].sort(); d[ds.std] = st; b.setAttribute("aria-pressed", lv.has(n)); return touch(); }
@@ -460,8 +526,9 @@ document.addEventListener("click", async e => {
 function rerenderKeepScroll() { const y = window.scrollY; renderObj(); window.scrollTo(0, y); }
 
 /* ---------------- Unterlagen (Scans, PDFs, Bilder) ---------------- */
-const docRows = () => { const f = SECTIONS.flatMap(s => s.f).find(x => x.t === "docs"); return visRows(f, cur.data).map(i => ({ i, l: f.rows[i] })); };
-const docLabel = ri => { const f = SECTIONS.flatMap(s => s.f).find(x => x.t === "docs"); return ri >= 0 ? f.rows[ri] : "Sonstige Unterlage"; };
+const docRows = () => { const f = SEC().flatMap(s => s.f).find(x => x.t === "docs"); return visRows(f, cur.data).map(i => ({ i, l: f.rows[i] })); };
+const fileLabel = f => f.label || docLabel(f.docRow);
+const docLabel = ri => { const f = SEC().flatMap(s => s.f).find(x => x.t === "docs"); return ri >= 0 ? f.rows[ri] : "Sonstige Unterlage"; };
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
 function docsHTML() {
   const rows = docRows(); if (docType === "" && rows.length) docType = String(rows[0].i);
@@ -478,7 +545,7 @@ function docsHTML() {
         <label class="btn addph">${ICON.plus}Datei wählen (PDF, Bild)<input type="file" accept="application/pdf,image/jpeg,image/png" multiple id="docIn" aria-label="Datei wählen"></label></div>`}
     <div style="font-size:14px;color:var(--muted)">${curFiles.length} Datei(en) · ${pend ? `<b style="color:var(--warn)">${pend} noch nicht auf dem Server</b>` : "alle auf dem Server"}</div>
     <div class="filelist">${curFiles.map(f => `<div class="filerow"><span class="ficon">${f.mime === "application/pdf" ? "PDF" : "BILD"}</span>
-        <div class="finfo"><b>${esc(docLabel(f.docRow))}</b><span>${esc(f.name || "")}${f.size ? " · " + fmtSize(f.size) : ""}${f.pages ? " · " + f.pages + " S." : ""}</span><span>${f.fileId ? "✓ auf dem Server" : "nicht abgeglichen"}</span></div>
+        <div class="finfo"><b>${esc(fileLabel(f))}</b><span>${esc(f.name || "")}${f.size ? " · " + fmtSize(f.size) : ""}${f.pages ? " · " + f.pages + " S." : ""}</span><span>${f.fileId ? "✓ auf dem Server" : "nicht abgeglichen"}</span></div>
         <div class="factions">${f.blob ? `<button type="button" class="btn small" data-fview="${f.id}">Ansehen</button>` : ""}<button type="button" class="btn small danger" data-fdel="${f.id}" data-on-server="${f.fileId ? 1 : 0}">Löschen</button></div></div>`).join("") || `<div class="empty">Noch keine Unterlagen. Art wählen, dann scannen oder eine Datei wählen.</div>`}</div>
   </section>`;
 }
@@ -533,10 +600,10 @@ async function addDocFiles(files) {
 async function storeDoc(blob, mime, ext, pages) {
   const ri = Number(docType === "" ? -1 : docType);
   const base = safeName(docLabel(ri).replace(/\s*\(.*?\)/g, "")).replace(/[ ,/.]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 50);
-  const f = { id: uid(), obj: cur.id, docRow: ri, mime, blob, size: blob.size, pages, added: new Date().toISOString(), by: session.user.email };
+  const f = { id: uid(), obj: cur.id, docRow: ri, label: docLabel(ri), mime, blob, size: blob.size, pages, added: new Date().toISOString(), by: session.user.email };
   f.name = `${base}_${f.id.slice(-6)}.${ext}`;
   await store.put("files", f); curFiles.push(f);
-  if (ri >= 0) { const m = cur.data.docs || {}; m[ri] = { ...(m[ri] || {}), s: "liegt vor" }; cur.data.docs = m; }
+  if (ri >= 0) { const df = SEC().flatMap(x => x.f).find(x => x.t === "docs"); const m = cur.data.docs || {}; m[ri] = { ...(m[ri] || {}), s: df.o[0] }; cur.data.docs = m; }
   cur.pendingPhotos = true; touch();
 }
 async function deleteDoc(id) {
@@ -546,8 +613,8 @@ async function deleteDoc(id) {
 function viewDoc(id) {
   const f = curFiles.find(x => x.id === id); if (!f || !f.blob) return;
   const u = URL.createObjectURL(f.blob);
-  if (f.mime !== "application/pdf") return sheet(`<h2>${esc(docLabel(f.docRow))}</h2><img src="${u}" alt="" style="max-height:65vh;width:auto;max-width:100%"><button class="btn" data-close>Schließen</button>`);
-  if (IS_APP) return sheet(`<h2>${esc(docLabel(f.docRow))}</h2><p style="margin:0">PDF mit ${f.pages || "?"} Seite(n), ${fmtSize(f.size)}. PDFs lassen sich in der App nicht direkt anzeigen – nach dem Abgleich im Drive-Ordner „Unterlagen“ ansehen.</p><button class="btn" data-close>Schließen</button>`);
+  if (f.mime !== "application/pdf") return sheet(`<h2>${esc(fileLabel(f))}</h2><img src="${u}" alt="" style="max-height:65vh;width:auto;max-width:100%"><button class="btn" data-close>Schließen</button>`);
+  if (IS_APP) return sheet(`<h2>${esc(fileLabel(f))}</h2><p style="margin:0">PDF mit ${f.pages || "?"} Seite(n), ${fmtSize(f.size)}. PDFs lassen sich in der App nicht direkt anzeigen – nach dem Abgleich im Drive-Ordner „Unterlagen“ ansehen.</p><button class="btn" data-close>Schließen</button>`);
   window.open(u, "_blank");
 }
 
@@ -565,7 +632,7 @@ function photosHTML() {
       <div class="ph"><button type="button" class="img" data-thumb="${p.id}" data-full="${p.id}" style="border:0;padding:0" aria-label="Foto vergrößern">${p.blob || p.thumb ? "" : "Vorschau laden"}</button><div class="body">
         <input type="text" id="cap_${p.id}" data-cap="${p.id}" value="${esc(p.caption)}" placeholder="Beschriftung" aria-label="Beschriftung">
         <select data-pcat="${p.id}" aria-label="Kategorie ändern">${PHOTO_CATS.map(c => `<option${c === p.cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>
-        <div class="acts"><span>${p.fileId ? "✓ auf dem Server" : "nicht abgeglichen"}${p.by && p.by !== session.user.email ? " · " + esc(p.by.split("@")[0]) : ""}</span><button type="button" data-delph="${p.id}" data-on-server="${p.fileId ? 1 : 0}">Löschen</button></div></div></div>`).join("")}</div></div>`).join("")
+        <div class="acts"><span>${p.fileId ? "✓ auf dem Server" : "nicht abgeglichen"}${p.by && cur.kunde && p.by === cur.kunde && !isKunde() ? " · Eigentümer" : p.by && p.by !== session.user.email && !isKunde() ? " · " + esc(p.by.split("@")[0]) : ""}</span><button type="button" data-delph="${p.id}" data-on-server="${p.fileId ? 1 : 0}">Löschen</button></div></div></div>`).join("")}</div></div>`).join("")
       : `<div class="empty">Noch keine Fotos. Kategorie wählen und „Foto aufnehmen“ tippen.</div>`}</section>`;
 }
 function photoUrl(p) {
@@ -656,9 +723,11 @@ function objMenu() {
     ${cur.folderUrl && isAdmin() ? `<a class="btn" href="${esc(cur.folderUrl)}" target="_blank" rel="noopener">Ordner in Google Drive öffnen</a>` : ""}
     ${cur.version ? `<button class="btn" id="reload">Neueste Fassung vom Server laden</button>` : ""}
     <button class="btn" id="delObj">Nur von diesem Gerät entfernen</button>
+    ${isAdmin() ? `<button class="btn" id="invK">${cur.kunde ? "Eigentümer erneut einladen" : "Eigentümer einladen"}</button>` : ""}
     ${isAdmin() && cur.version ? `<button class="btn danger" id="delAll">Objekt löschen (für alle)</button>` : ""}
     <button class="btn" data-close>Schließen</button>`);
   const da = $("#delAll"); if (da) da.onclick = () => adminDelete(cur.id, objTitle(cur));
+  const ik = $("#invK"); if (ik) ik.onclick = () => { if (!cur.version) return toast("Bitte die Aufnahme zuerst einmal abgleichen."); inviteSheet(cur.id, objTitle(cur), cur.kunde); };
   const rl = $("#reload"); if (rl) rl.onclick = () => {
     const doIt = async () => { try { await loadServerObject(cur.id); closeSheet(); openObject(cur.id, secIdx); toast("Neueste Fassung geladen"); } catch (e) { toast(e.message); } };
     if (cur.dirty) confirmSheet("Lokale Änderungen verwerfen?", "Auf diesem Gerät gibt es Änderungen, die noch nicht auf dem Server sind. Sie gehen verloren.", "Laden", doIt); else doIt();
@@ -693,8 +762,15 @@ function accountSheet() {
 
 /* ---------------- Abgleich ---------------- */
 function protocol() {
-  const d = cur.data, out = [];
-  for (const s of SECTIONS) {
+  const out = protocolFor(SEC(), cur.data);
+  if (!isKunde() && cur.kd && Object.keys(cur.kd).length) { const k = protocolFor(KSECTIONS, cur.kd); if (k.length) out.push({ title: "Angaben des Eigentümers", rows: k.flatMap(x => x.rows.map(([a, b]) => [x.title + ": " + a, b])) }); }
+  if (curFiles.length) out.push({ title: "Unterlagen (Dateien im Ordner „Unterlagen“)", rows: curFiles.map(f => [fileLabel(f), (f.name || "") + (f.pages ? " · " + f.pages + " Seite(n)" : "")]) });
+  if (curPhotos.length) out.push({ title: "Fotodokumentation", rows: curPhotos.map(p => [p.name || p.cat, [p.cat, p.caption].filter(Boolean).join(" – ")]) });
+  return out;
+}
+function protocolFor(sections, d) {
+  const out = [];
+  for (const s of sections) {
     if (!vis(s, d)) continue;
     const rows = [];
     for (const f of s.f) {
@@ -709,19 +785,17 @@ function protocol() {
     }
     if (rows.length) out.push({ title: s.n + ". " + s.t, rows });
   }
-  if (curFiles.length) out.push({ title: "Unterlagen (Dateien im Ordner „Unterlagen“)", rows: curFiles.map(f => [docLabel(f.docRow), (f.name || "") + (f.pages ? " · " + f.pages + " Seite(n)" : "")]) });
-  if (curPhotos.length) out.push({ title: "Fotodokumentation", rows: curPhotos.map(p => [p.name || p.cat, [p.cat, p.caption].filter(Boolean).join(" – ")]) });
   return out;
 }
 const safeName = s => String(s || "").replace(/[\\/:*?"<>|#\n\r]+/g, " ").replace(/\s+/g, " ").trim();
 function photoName(p) { const i = PHOTO_CATS.indexOf(p.cat) + 1; return `${String(i).padStart(2, "0")}_${safeName(p.cat).replace(/ \/ /g, "-").replace(/ /g, "_")}_${p.id.slice(-6)}.jpg`; }
-const fileMeta = () => curFiles.filter(f => f.fileId).map(f => ({ id: f.id, docRow: f.docRow, mime: f.mime, name: f.name, size: f.size, pages: f.pages || 0, added: f.added, by: f.by || "", fileId: f.fileId }));
+const fileMeta = () => curFiles.filter(f => f.fileId).map(f => ({ id: f.id, docRow: f.docRow, label: fileLabel(f), mime: f.mime, name: f.name, size: f.size, pages: f.pages || 0, added: f.added, by: f.by || "", fileId: f.fileId }));
 const photoMeta = () => curPhotos.filter(p => p.fileId).map(p => ({ id: p.id, cat: p.cat, caption: p.caption || "", taken: p.taken, by: p.by || "", fileId: p.fileId, name: p.name }));
 function slog(m, c = "") { const l = $("#slog"); if (l) l.insertAdjacentHTML("beforeend", `<div class="${c}">${esc(m)}</div>`); }
 function bar(p) { const b = $("#sbar"); if (b) b.style.width = p + "%"; }
 async function saveRemote(force) {
-  const r = await api("saveObject", { object: { id: cur.id, title: objTitle(cur), data: cur.data, photos: photoMeta(), files: fileMeta(), created: cur.created }, baseVersion: cur.version || 0, force: !!force, protocol: protocol() });
-  cur.version = r.version; cur.folderUrl = r.folderUrl; await store.put("objects", cur);
+  const r = await api("saveObject", { object: { id: cur.id, title: objTitle(cur), data: cur.data, photos: photoMeta(), files: fileMeta(), created: cur.created }, baseVersion: cur.version || 0, baseSv: cur.svVersion != null ? cur.svVersion : (cur.version || 0), force: !!force, protocol: protocol() });
+  cur.version = r.version; if (r.svVersion) cur.svVersion = r.svVersion; if (r.folderUrl) cur.folderUrl = r.folderUrl; await store.put("objects", cur);
 }
 async function syncNow(force = false) {
   if (busy) return;
@@ -741,14 +815,15 @@ async function syncNow(force = false) {
     }
     const ftodo = curFiles.filter(f => !f.fileId && f.blob); let k = 0;
     for (const f of ftodo) {
-      const r = await api("uploadDoc", { objectId: cur.id, name: f.name, mime: f.mime, docType: docLabel(f.docRow), b64: await blobToB64(f.blob) });
+      const r = await api("uploadDoc", { objectId: cur.id, name: f.name, mime: f.mime, docType: fileLabel(f), b64: await blobToB64(f.blob) });
       f.fileId = r.fileId; await store.put("files", f);
       k++; slog(`Unterlage ${k}/${ftodo.length} übertragen`, "o");
     }
     cur.pendingPhotos = curPhotos.some(p => !p.fileId) || curFiles.some(f => !f.fileId);
     if (todo.length || ftodo.length || curPhotos.some(p => p.fileId) || curFiles.some(f => f.fileId)) await saveRemote(true);
     cur.dirty = false; cur.serverNewer = 0; cur.goneOnServer = false; cur.lastSync = new Date().toISOString(); await store.put("objects", cur); bar(100);
-    slog("Abgleich abgeschlossen. Daten, Fotos und Protokoll liegen im Büro-Drive.", "o");
+    try { await loadServerObject(cur.id); const keep = secIdx; await openObject(cur.id, keep, true); } catch (e) { /* zusammengeführte Fassung später */ }
+    slog(isKunde() ? "Gespeichert. Ihre Angaben, Fotos und Unterlagen sind bei Immobilien Pospiech angekommen." : "Abgleich abgeschlossen. Daten, Fotos und Protokoll liegen im Büro-Drive.", "o");
   } catch (e) {
     if (e.code === "conflict") {
       slog(e.message + " (" + fmtTime(e.extra.updated) + ")", "e");
@@ -770,24 +845,26 @@ async function syncNow(force = false) {
 async function renderAdmin(tab = "users", push = false) {
   view = "admin"; if (push) go("admin");
   $("#app").innerHTML = `<header class="top"><div class="wrap"><button class="btn ghost" id="adminBack" aria-label="Zurück">${ICON.back}</button><h1>Verwaltung</h1></div></header>
-    <main class="wrap"><div class="tabs" style="margin-top:10px"><button data-at="users" aria-selected="${tab === "users"}">Benutzer</button><button data-at="access" aria-selected="${tab === "access"}">Objektzugriff</button></div>
+    <main class="wrap"><div class="tabs" style="margin-top:10px"><button data-at="users" aria-selected="${tab === "users"}">Benutzer</button><button data-at="access" aria-selected="${tab === "access"}">Objektzugriff</button><button data-at="kunden" aria-selected="${tab === "kunden"}">Eigentümer</button></div>
     <div id="adm" class="list" style="padding-top:14px"><div class="empty">Wird geladen …</div></div></main>`;
   $("#adminBack").onclick = () => history.back();
   document.querySelectorAll("[data-at]").forEach(b => b.onclick = () => renderAdmin(b.dataset.at));
   try {
     const users = (await api("listUsers")).users;
     if (tab === "users") return adminUsers(users);
-    const objs = (await api("listObjects")).objects; adminAccess(objs, users);
+    const objs = (await api("listObjects")).objects;
+    if (tab === "kunden") return adminKunden(objs, users);
+    adminAccess(objs, users.filter(u => u.role !== "kunde"));
   } catch (e) { $("#adm").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
 }
 function adminUsers(users) {
   const order = { beantragt: 0, freigegeben: 1, gesperrt: 2 };
   users.sort((a, b) => (order[a.status] - order[b.status]) || a.name.localeCompare(b.name));
-  $("#adm").innerHTML = users.map(u => `<div class="admin-row"><div class="who"><b>${esc(u.name)}</b><span class="chip ${u.status === "freigegeben" ? "ok" : u.status === "beantragt" ? "warn" : "new"}">${esc(u.status)}${u.role === "admin" ? " · Admin" : ""}</span></div>
+  $("#adm").innerHTML = users.map(u => `<div class="admin-row"><div class="who"><b>${esc(u.name)}</b><span class="chip ${u.status === "freigegeben" ? "ok" : u.status === "beantragt" ? "warn" : "new"}">${esc(u.status)}${u.role === "admin" ? " · Admin" : u.role === "kunde" ? " · Eigentümer" : ""}</span></div>
     <div style="color:var(--muted);font-size:14px">${esc(u.email)} · beantragt ${esc(fmtDate(u.requestedAt))}${u.lastLogin ? " · zuletzt " + esc(fmtTime(u.lastLogin)) : ""}</div>
     <div class="btns">${u.status !== "freigegeben" ? `<button class="btn small primary" data-us="${esc(u.email)}" data-st="freigegeben">Freigeben</button>` : ""}
       ${u.status !== "gesperrt" && u.email !== session.user.email ? `<button class="btn small danger" data-us="${esc(u.email)}" data-st="gesperrt">Sperren</button>` : ""}
-      ${u.email !== session.user.email ? `<button class="btn small" data-us="${esc(u.email)}" data-ro="${u.role === "admin" ? "nutzer" : "admin"}">${u.role === "admin" ? "Admin-Rechte entziehen" : "Zum Admin machen"}</button>` : ""}
+      ${u.email !== session.user.email && u.role !== "kunde" ? `<button class="btn small" data-us="${esc(u.email)}" data-ro="${u.role === "admin" ? "nutzer" : "admin"}">${u.role === "admin" ? "Admin-Rechte entziehen" : "Zum Admin machen"}</button>` : ""}
       <button class="btn small" data-reset="${esc(u.email)}">Passwort zurücksetzen</button></div></div>`).join("") || `<div class="empty">Noch keine Benutzer.</div>`;
   $("#adm").onclick = async e => {
     const b = e.target.closest("button"); if (!b) return;
@@ -798,6 +875,40 @@ function adminUsers(users) {
     } catch (x) { toast(x.message); }
   };
 }
+function inviteSheet(objectId, title, email) {
+  sheet(`<h2>Eigentümer einladen</h2><p style="margin:0">${objectId ? `Für <b>${esc(title)}</b>.` : "Legt ein neues Objekt an und lädt den Eigentümer dazu ein."} Der Eigentümer erhält einen persönlichen Link, vergibt ein Passwort und sieht nur den Verkaufs-Fragebogen zu diesem Objekt.</p>
+    <form id="invForm" style="display:flex;flex-direction:column;gap:10px" novalidate>
+      ${objectId ? "" : `<label class="fld"><span>Adresse des Objekts</span><input type="text" id="inv_title" placeholder="Straße Nr., Ort" required></label>`}
+      <label class="fld"><span>Name des Eigentümers</span><input type="text" id="inv_name" autocomplete="off" required></label>
+      <label class="fld"><span>E-Mail-Adresse</span><input type="email" id="inv_mail" value="${esc(email || "")}" autocomplete="off" required></label>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="inv_send" checked> Einladung per E-Mail senden</label>
+      <div id="invMsg"></div><button class="btn primary" type="submit" id="invGo">Einladen</button></form><button class="btn" data-close>Schließen</button>`);
+  $("#invForm").onsubmit = async ev => {
+    ev.preventDefault(); $("#invGo").disabled = true;
+    const mail = $("#inv_mail").value.trim().toLowerCase();
+    try {
+      const r = await api("createInvite", { objectId: objectId || "", title: objectId ? "" : $("#inv_title").value.trim(), name: $("#inv_name").value.trim(), email: $("#inv_mail").value.trim(), sendMail: $("#inv_send").checked });
+      $("#invForm").innerHTML = `<div class="msg ok">${r.mailed ? "Die Einladung wurde per E-Mail verschickt." : "Einladung erstellt."} ${r.existing ? "Der Eigentümer hat schon einen Zugang und sieht das Objekt beim nächsten Anmelden." : "Sie können den Link auch selbst weitergeben (z. B. per SMS oder WhatsApp):"}</div>
+        ${r.existing ? "" : `<div style="font-size:14px;word-break:break-all;user-select:all;padding:10px;background:var(--sunk)" id="invLink">${esc(r.link)}</div><button type="button" class="btn" id="invCopy">Link kopieren</button>`}`;
+      const cp = $("#invCopy"); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(r.link); toast("Link kopiert"); } catch (e) { toast("Bitte den Link markieren und kopieren"); } };
+      refreshRemote.at = 0;
+      if (cur && cur.id === r.objectId) { cur.kunde = mail; cur.kstatus = "offen"; await store.put("objects", cur); if (view === "obj") renderObj(); }
+      if (!objectId) refreshRemote(true);
+    } catch (e) { $("#invMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; $("#invGo").disabled = false; }
+  };
+}
+function submitKunde() {
+  confirmSheet("Angaben übergeben?", "Ihre Angaben, Fotos und Unterlagen werden an Immobilien Pospiech geschickt. Danach können Sie nichts mehr ändern – für Ergänzungen rufen Sie uns einfach an.", "Jetzt übergeben", async () => {
+    await syncNow();
+    if (cur.dirty || cur.pendingPhotos) return toast("Bitte zuerst erfolgreich speichern (Internetverbindung prüfen).");
+    try { await api("submitKunde", { objectId: cur.id }); cur.locked = true; cur.kstatus = "übergeben"; await store.put("objects", cur); closeSheet(); renderObj(); toast("Vielen Dank! Ihre Angaben sind übergeben."); }
+    catch (e) { toast(e.message); }
+  });
+}
+async function reopenKunde() {
+  try { await api("reopenKunde", { objectId: cur.id }); cur.kstatus = "offen"; await store.put("objects", cur); renderObj(); toast("Der Eigentümer kann wieder bearbeiten"); }
+  catch (e) { toast(e.message); }
+}
 function adminDelete(id, title) {
   sheet(`<h2>Objekt löschen?</h2><p style="margin:0"><b>${esc(title)}</b> wird für alle Nutzer gelöscht. Der Drive-Ordner mit Fotos, Unterlagen und Protokoll kommt in den Google-Drive-Papierkorb und kann dort 30 Tage lang wiederhergestellt werden.</p>
     <label class="fld"><span>Zur Bestätigung LÖSCHEN eintippen</span><input type="text" id="delConfirm" autocomplete="off"></label>
@@ -807,6 +918,22 @@ function adminDelete(id, title) {
     $("#delGo").disabled = true;
     try { await api("deleteObject", { objectId: id }); await removeLocal(id); remote = remote.filter(x => x.id !== id); closeSheet(); toast("Objekt gelöscht"); if (view === "admin") renderAdmin("access"); else { cur = null; renderHome(false); } }
     catch (e) { toast(e.message); $("#delGo").disabled = false; }
+  };
+}
+function adminKunden(objs, users) {
+  const ks = objs.filter(o => o.kunde);
+  const name = m => (users.find(u => u.email === m) || {}).name || "";
+  $("#adm").innerHTML = `<button type="button" class="btn primary" id="newInv">${ICON.plus}Eigentümer einladen (neues Objekt)</button>
+    <div class="hint" style="font-style:normal;color:var(--muted)">Für ein bestehendes Objekt: Aufnahme öffnen → ⋯ → Eigentümer einladen.</div>` +
+    (ks.map(o => `<div class="admin-row"><div class="who"><b>${esc(o.title || "Ohne Bezeichnung")}</b><span class="chip ${o.kstatus === "übergeben" ? "ok" : "warn"}">${o.kstatus === "übergeben" ? "übergeben" : "in Arbeit"}</span></div>
+      <div style="color:var(--muted);font-size:14px">${esc(name(o.kunde))} ${esc(o.kunde)} · zuletzt ${esc(fmtTime(o.updated))}</div>
+      <div class="btns">${o.kstatus === "übergeben" ? `<button class="btn small" data-kopen="${esc(o.id)}">Wieder freigeben</button>` : ""}<button class="btn small" data-kinv="${esc(o.id)}">Einladung erneut senden</button></div></div>`).join("") || `<div class="empty">Noch keine Eigentümer eingeladen.</div>`);
+  $("#adm").onclick = async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.id === "newInv") return inviteSheet(null, "", "");
+    const o = objs.find(x => x.id === (b.dataset.kopen || b.dataset.kinv)); if (!o) return;
+    if (b.dataset.kinv) return inviteSheet(o.id, o.title, o.kunde);
+    try { await api("reopenKunde", { objectId: o.id }); toast("Wieder freigegeben"); renderAdmin("kunden"); } catch (x) { toast(x.message); }
   };
 }
 function adminAccess(objs, users) {
@@ -827,7 +954,9 @@ function adminAccess(objs, users) {
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); if (document.visibilityState !== "visible" || !session) return; if (view === "home") refreshRemote(true); else if (view === "obj") checkServerVersion(); });
   window.addEventListener("offline", () => { if (view === "home") renderHome(false); });
   try { history.replaceState({ v: "root" }, ""); } catch (e) {}
-  if (session && session.token) renderHome(false); else renderAuth();
+  const invTok = new URLSearchParams(location.search).get("einladung");
+  if (invTok) renderInvite(invTok);
+  else if (session && session.token) renderHome(false); else renderAuth();
   checkForUpdate();
   if ("serviceWorker" in navigator && location.protocol === "https:" && !window.Capacitor) { try { navigator.serviceWorker.register("sw.js"); } catch (e) {} }
 })();

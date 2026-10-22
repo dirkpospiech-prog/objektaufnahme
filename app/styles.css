@@ -165,6 +165,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--brand); outline:
 .stdall { background: var(--brand-soft); padding: 12px; }
 .ph select { font-size: 13px; min-height: 36px; padding: 4px 8px; }
 
+/* Eigentümer */
+fieldset.fs { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset.fs[disabled] .btn, fieldset.fs[disabled] .pill, fieldset.fs[disabled] .addph { opacity: .55; }
+.kblock { display: flex; flex-direction: column; gap: 4px; background: var(--card); border: 1px solid var(--line); padding: 12px 14px; }
+.kblock h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--brand); margin-bottom: 4px; }
+.krow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.krow span { color: var(--muted); }
+.krow b { color: var(--ink-strong); font-weight: 600; overflow-wrap: anywhere; }
+
 /* Unterlagen */
 .actions.stack { flex-direction: column; }
 .actions.stack .btn { flex: none; width: 100%; white-space: normal; }
