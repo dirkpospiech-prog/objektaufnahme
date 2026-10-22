@@ -2,7 +2,7 @@
 /* Objektaufnahme Pospiech – App
    Offline zuerst: alles wird auf dem Gerät gespeichert und per „Abgleichen“ zum Server (Google Apps Script) übertragen. */
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const LS = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
@@ -89,8 +89,21 @@ function filled(f, d) {
   return v !== undefined && v !== null && String(v).trim() !== "";
 }
 const countable = f => !["h", "hint"].includes(f.t);
-const secProgress = (s, d) => { const fs = s.f.filter(countable); return Math.round(100 * fs.filter(f => filled(f, d)).length / fs.length); };
-function totalProgress(o) { const d = o.data || {}; let a = 0, b = 0; SECTIONS.forEach(s => s.f.filter(countable).forEach(f => { b++; if (filled(f, d)) a++; })); return Math.round(100 * a / b); }
+const vis = (x, d) => !x.when || x.when(d);
+const optsOf = (f, d) => f.opts ? f.opts(d) : f.o;
+const visSections = d => SECTIONS.map((s, i) => i).filter(i => vis(SECTIONS[i], d));
+const visRows = (f, d) => f.rows.map((l, i) => i).filter(i => !f.rowWhen || !f.rowWhen[i] || f.rowWhen[i](d));
+/* Nach einer Änderung: Auswahlen bereinigen, die es für die neue Objektart nicht mehr gibt, und Verfahren vorbelegen */
+function applyCascade(d) {
+  SECTIONS.forEach(s => s.f.forEach(f => {
+    if (!f.opts) return; const o = f.opts(d);
+    if (f.t === "multi" && Array.isArray(d[f.id])) d[f.id] = d[f.id].filter(v => o.includes(v));
+    if (f.t === "single" && d[f.id] && !o.includes(d[f.id])) d[f.id] = "";
+  }));
+  if (known(d) && (!d.verfahren || !d.verfahren.length)) d.verfahren = [VERFAHREN(d)[0]];
+}
+const secProgress = (s, d) => { const fs = s.f.filter(f => countable(f) && vis(f, d)); return fs.length ? Math.round(100 * fs.filter(f => filled(f, d)).length / fs.length) : 100; };
+function totalProgress(o) { const d = o.data || {}; let a = 0, b = 0; SECTIONS.filter(s => vis(s, d)).forEach(s => s.f.filter(f => countable(f) && vis(f, d)).forEach(f => { b++; if (filled(f, d)) a++; })); return b ? Math.round(100 * a / b) : 0; }
 function syncState(o) {
   if (!o.version) return ["new", "Noch nicht auf dem Server"];
   if (o.dirty || o.pendingPhotos) return ["warn", "Änderungen nicht abgeglichen"];
@@ -221,7 +234,7 @@ async function openObject(id, sec = 0) {
 /* ---------------- Objekt-Ansicht ---------------- */
 function renderObj() {
   const d = cur.data; const [c, t] = syncState(cur);
-  const tabs = SECTIONS.map((s, i) => `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
+  const tabs = SECTIONS.map((s, i) => !vis(s, d) ? "" : `<button data-sec="${i}" aria-current="${i === secIdx}"><span class="n">${s.n}</span>${esc(s.t)}<span class="p">${secProgress(s, d)}%</span></button>`).join("")
     + `<button data-sec="F" aria-current="${secIdx === "F"}">${ICON.cam}Fotos<span class="p">${curPhotos.length}</span></button>`;
   $("#app").innerHTML = `
   <header class="top"><div class="wrap">
@@ -238,11 +251,14 @@ function renderObj() {
 function renderSection() {
   const m = $("#main");
   if (secIdx === "F") { m.innerHTML = photosHTML(); bindPhotos(); return; }
-  const s = SECTIONS[secIdx];
-  m.innerHTML = `<section class="sec"><div class="sec-head"><span class="num">${s.n}</span><h2>${esc(s.t)}</h2></div>
-    <div class="grp">${s.f.map(f => fieldHTML(f, cur.data)).join("")}</div></section>
-    <div class="secfoot">${secIdx > 0 ? `<button class="btn" data-go="${secIdx - 1}">‹ ${esc(SECTIONS[secIdx - 1].t)}</button>` : "<span></span>"}
-    ${secIdx < SECTIONS.length - 1 ? `<button class="btn primary" data-go="${secIdx + 1}">${esc(SECTIONS[secIdx + 1].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`;
+  const d = cur.data, list = visSections(d);
+  if (!list.includes(secIdx)) secIdx = list.find(i => i > secIdx) ?? list[list.length - 1];
+  const s = SECTIONS[secIdx], pos = list.indexOf(secIdx), prev = list[pos - 1], next = list[pos + 1];
+  const hint = !known(d) && s.id !== "s3" ? `<div class="msg info">Tipp: Erst in Abschnitt 3 die <b>Objektart</b> wählen – dann blendet die App alles aus, was für dieses Objekt nicht gebraucht wird.</div>` : "";
+  m.innerHTML = `<section class="sec"><div class="sec-head"><span class="num">${s.n}</span><h2>${esc(s.t)}</h2></div>${hint}
+    <div class="grp">${s.f.filter(f => vis(f, d)).map(f => fieldHTML(f, d)).join("")}</div></section>
+    <div class="secfoot">${prev !== undefined ? `<button class="btn" data-go="${prev}">‹ ${esc(SECTIONS[prev].t)}</button>` : "<span></span>"}
+    ${next !== undefined ? `<button class="btn primary" data-go="${next}">${esc(SECTIONS[next].t)} ›</button>` : `<button class="btn primary" data-go="F">Fotos ›</button>`}</div>`;
 }
 function pills(id, opts, val, multi) {
   return `<div class="pills" role="group">${opts.map(o => { const on = multi ? (val || []).includes(o) : val === o;
@@ -255,7 +271,7 @@ function fieldHTML(f, d) {
     case "hint": return `<div class="hint">${esc(f.l)}</div>`;
     case "text": return `<label class="fld${f.full ? " full" : ""}"><span>${esc(f.l)}</span><input type="${f.type || "text"}" id="f_${f.id}" data-k="${f.id}" value="${esc(v)}"${f.num ? ' inputmode="decimal"' : ""} autocomplete="off"></label>`;
     case "area": return `<label class="fld full"><span>${esc(f.l)}</span><textarea id="f_${f.id}" data-k="${f.id}">${esc(v)}</textarea></label>`;
-    case "single": case "multi": return `<div class="fld full"><span>${esc(f.l)}</span>${pills(f.id, f.o, v, f.t === "multi")}</div>`;
+    case "single": case "multi": return `<div class="fld full"><span>${esc(f.l)}</span>${pills(f.id, optsOf(f, d), v, f.t === "multi")}</div>`;
     case "yn": { const y = v || {};
       return `<div class="yn"><div class="q">${esc(f.l)}</div><div class="row"><div class="seg" role="group" aria-label="${esc(f.l)}">${[["Ja", "y"], ["Nein", "n"], ["unbek.", "u"]].map(([l, c]) => `<button type="button" class="${c}" aria-pressed="${y.v === l}" data-yn="${f.id}" data-v="${l}">${l}</button>`).join("")}</div>
         <input type="text" id="f_${f.id}_n" data-ynote="${f.id}" value="${esc(y.n)}" placeholder="Erläuterung" aria-label="Erläuterung ${esc(f.l)}"></div></div>`; }
@@ -272,7 +288,7 @@ function fieldHTML(f, d) {
         <div class="fld"><span>Umfang</span>${pills("mod:" + ri, ["vollständig", "teilweise"], r.u, false)}</div>
         <label class="fld full"><span>Details / Kosten</span><input type="text" id="f_mod_${ri}_d" data-mod="${ri}" data-c="d" value="${esc(r.d)}"></label></div>`; }).join("")}</div>`; }
     case "docs": { const dv = v || {};
-      return f.rows.map((l, ri) => `<div class="doc"><div>${esc(l)}</div>${pills("doc:" + ri, f.o, (dv[ri] || {}).s, false)}</div>`).join(""); }
+      return visRows(f, d).map(ri => `<div class="doc"><div>${esc(f.rows[ri])}</div>${pills("doc:" + ri, f.o, (dv[ri] || {}).s, false)}</div>`).join(""); }
   }
   return "";
 }
@@ -320,10 +336,11 @@ document.addEventListener("click", async e => {
       const m = d[key] || {}; const r = m[ri] || {}; r[f] = r[f] === ds.v ? "" : ds.v; m[ri] = r; d[key] = m; val = r[f];
     } else if (ds.m === "1") { const a = new Set(d[ds.k] || []); a.has(ds.v) ? a.delete(ds.v) : a.add(ds.v); d[ds.k] = [...a]; }
     else { d[ds.k] = d[ds.k] === ds.v ? "" : ds.v; val = d[ds.k]; }
+    if (DEPENDS.has(ds.k)) { applyCascade(d); touch(); return rerenderKeepScroll(); }
     b.parentElement.querySelectorAll(".pill").forEach(p => p.setAttribute("aria-pressed", ds.m === "1" ? (d[ds.k] || []).includes(p.dataset.v) : p.dataset.v === val));
     return touch();
   }
-  if (ds.yn) { const y = d[ds.yn] || {}; y.v = y.v === ds.v ? "" : ds.v; d[ds.yn] = y; b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.v === y.v)); return touch(); }
+  if (ds.yn) { const y = d[ds.yn] || {}; y.v = y.v === ds.v ? "" : ds.v; d[ds.yn] = y; if (DEPENDS.has(ds.yn)) { touch(); return rerenderKeepScroll(); } b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.v === y.v)); return touch(); }
   if (ds.std) { const st = d[ds.std] || {}; const lv = new Set(st.lv || []); const n = +ds.v; lv.has(n) ? lv.delete(n) : lv.add(n); st.lv = [...lv].sort(); d[ds.std] = st; b.setAttribute("aria-pressed", lv.has(n)); return touch(); }
   if (ds.gadd) { const a = Array.isArray(d[ds.gadd]) && d[ds.gadd].length ? d[ds.gadd] : [{}]; a.push({}); d[ds.gadd] = a; touch(); return renderSection(); }
   if (ds.gdel) { const a = d[ds.gdel] || []; a.splice(+ds.r, 1); d[ds.gdel] = a; touch(); return renderSection(); }
@@ -331,6 +348,8 @@ document.addEventListener("click", async e => {
   if (ds.delph) return confirmSheet("Foto löschen?", ds.onServer === "1" ? "Das Foto wird nur auf diesem Gerät entfernt. Auf dem Server bleibt es erhalten." : "Das Foto ist noch nicht auf dem Server und geht damit endgültig verloren.", "Foto löschen", () => deletePhoto(ds.delph));
   if (ds.full) return showPhoto(ds.full);
 });
+
+function rerenderKeepScroll() { const y = window.scrollY; renderObj(); window.scrollTo(0, y); }
 
 /* ---------------- Fotos ---------------- */
 function photosHTML() {
@@ -442,14 +461,15 @@ function accountSheet() {
 function protocol() {
   const d = cur.data, out = [];
   for (const s of SECTIONS) {
+    if (!vis(s, d)) continue;
     const rows = [];
     for (const f of s.f) {
-      if (!countable(f) || !filled(f, d)) continue; const v = d[f.id];
+      if (!countable(f) || !vis(f, d) || !filled(f, d)) continue; const v = d[f.id];
       if (f.t === "yn") rows.push([f.l, v.v + (v.n ? " – " + v.n : "")]);
       else if (f.t === "std") rows.push([f.l, "Stufe " + v.lv.join(", ") + (v.n ? " – " + v.n : "")]);
       else if (f.t === "grid") v.forEach((r, i) => { const t = f.cols.map(([k, l]) => r && r[k] ? l + ": " + r[k] : "").filter(Boolean).join("; "); if (t) rows.push([f.l + " " + (i + 1), t]); });
       else if (f.t === "modern") f.rows.forEach((l, i) => { const r = v[i]; if (r && (r.j || r.u || r.d)) rows.push([l, [r.j, r.u, r.d].filter(Boolean).join(" · ")]); });
-      else if (f.t === "docs") f.rows.forEach((l, i) => { const r = v[i]; if (r && r.s) rows.push([l, r.s]); });
+      else if (f.t === "docs") visRows(f, d).forEach(i => { const r = v[i]; if (r && r.s) rows.push([f.rows[i], r.s]); });
       else if (Array.isArray(v)) rows.push([f.l, v.join(", ")]);
       else rows.push([f.l, String(v)]);
     }

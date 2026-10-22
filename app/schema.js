@@ -20,8 +20,8 @@ const SECTIONS = [
   T("eig_anteile", "Beteiligte und Anteile", { full: 1 }),
   H("Erwerb"), T("erw_jahr", "Erwerbsjahr", { num: 1 }), T("erw_art", "Art (Kauf, Erbe, Schenkung, Eigenbau)"), T("erw_preis", "Kaufpreis / Baukosten (€)", { num: 1 }) ] },
  { id: "s3", n: "3", t: "Objekt & Grundbuch", f: [
+  { t: "single", id: "ob_art", l: "Objektart – bestimmt, welche Fragen erscheinen", o: ["Einfamilienhaus", "Zweifamilienhaus", "Doppelhaushälfte", "Reihenmittelhaus", "Reihenendhaus", "Mehrfamilienhaus", "Eigentumswohnung", "Wohn- und Geschäftshaus", "Gewerbe / Büro", "Bauland / unbebaut", "Wochenend- / Erholungsgrundstück", "Land- / Forstwirtschaft", "Sonstiges"] },
   T("ob_str", "Straße, Hausnummer", { full: 1 }), T("ob_plz", "PLZ", { num: 1 }), T("ob_ort", "Ort / Ortsteil"),
-  { t: "single", id: "ob_art", l: "Objektart", o: ["Einfamilienhaus", "Zweifamilienhaus", "Doppelhaushälfte", "Reihenmittelhaus", "Reihenendhaus", "Mehrfamilienhaus", "Eigentumswohnung", "Wohn- und Geschäftshaus", "Gewerbe / Büro", "Bauland / unbebaut", "Wochenend- / Erholungsgrundstück", "Land- / Forstwirtschaft", "Sonstiges"] },
   H("Grundbuch und Kataster"), T("gb_ag", "Amtsgericht"), T("gb_von", "Grundbuch von"), T("gb_blatt", "Blatt"), T("gb_gem", "Gemarkung"),
   T("gb_flur", "Flur"), T("gb_flst", "Flurstück(e)"), T("gb_bv", "lfd. Nr. Bestandsverzeichnis") ] },
  { id: "s4", n: "4", t: "Rechte & Lasten", f: [
@@ -52,6 +52,7 @@ const SECTIONS = [
   { t: "single", id: "dachform", l: "Dachform", o: ["Satteldach", "Walm-/Krüppelwalmdach", "Flachdach", "Pultdach", "Mansarddach", "Sonstige"] },
   H("Geschosse und Räume"), T("geschosse", "Vollgeschosse", { num: 1 }), T("zimmer", "Zimmer gesamt", { num: 1 }), T("baeder", "Badezimmer", { num: 1 }),
   T("wcs", "Gäste-WCs", { num: 1 }), T("we", "Wohneinheiten", { num: 1 }), T("ge", "Gewerbeeinheiten", { num: 1 }),
+  { t: "single", id: "einlieger", l: "Einliegerwohnung", o: ["keine", "vorhanden"] },
   { t: "single", id: "keller", l: "Unterkellerung", o: ["voll unterkellert", "teilunterkellert", "nicht unterkellert"] },
   { t: "multi", id: "kellernutzung", l: "Keller", o: ["einfacher Nutzkeller", "teilweise ausgebaut", "feucht / eingeschränkt nutzbar"] },
   { t: "single", id: "dg", l: "Dachgeschoss", o: ["ausgebaut", "teilausgebaut", "nicht ausgebaut, ausbaufähig", "nicht ausbaufähig / Flachdach"] },
@@ -135,3 +136,93 @@ const SECTIONS = [
   { t: "area", id: "sv_notizen", l: "Notizen" }, { t: "area", id: "sv_offen", l: "Offene Punkte / Nachforderungen" } ] }
 ];
 const PHOTO_CATS = ["Straßenansicht", "Rückansicht / Garten", "Seitenansichten", "Wohnräume", "Küche", "Bad / WC", "Keller", "Dach / Dachboden", "Heizung / Technik", "Zähler", "Schäden", "Außenanlagen", "Nebengebäude / Garage", "Unterlagen", "Lage / Umgebung", "Sonstiges"];
+
+/* =====================================================================
+   KASKADE – was je nach Objektart und Antworten angezeigt wird.
+   Ist noch keine Objektart gewählt (oder „Sonstiges“), erscheint alles.
+   Ausgeblendete Angaben bleiben gespeichert, zählen aber nicht mit
+   und erscheinen nicht im Aufnahmeprotokoll.
+   ===================================================================== */
+const ART = {
+  HAUS: ["Einfamilienhaus", "Doppelhaushälfte", "Reihenmittelhaus", "Reihenendhaus"],
+  ZFH: ["Zweifamilienhaus"],
+  ETW: ["Eigentumswohnung"],
+  ERTRAG: ["Mehrfamilienhaus", "Wohn- und Geschäftshaus", "Gewerbe / Büro"],
+  UNBEBAUT: ["Bauland / unbebaut", "Land- / Forstwirtschaft"],
+  FREIZEIT: ["Wochenend- / Erholungsgrundstück"]
+};
+const known = d => !!d.ob_art && d.ob_art !== "Sonstiges";
+const is = (d, ...g) => known(d) && g.some(x => ART[x].includes(d.ob_art));
+const only = (d, ...g) => !known(d) || is(d, ...g);      // nur bei diesen Arten (unbekannt: zeigen)
+const not = (d, ...g) => !is(d, ...g);                    // nicht bei diesen Arten
+const bebaut = d => not(d, "UNBEBAUT");
+const ja = (d, id) => (d[id] || {}).v === "Ja";
+const has = (d, id, v) => Array.isArray(d[id]) ? d[id].includes(v) : d[id] === v;
+const vermietet = d => ["teilweise vermietet", "vollständig vermietet", "verpachtet"].some(v => has(d, "nutzung", v));
+const mietrelevant = d => vermietet(d) || is(d, "ERTRAG");
+
+/* Antworten, nach deren Änderung der Bogen neu aufgebaut wird */
+const DEPENDS = new Set(["ob_art", "nutzung", "r_erbbau", "r_wohnrecht", "r_niess", "bauweise", "zustand", "pv", "ag_rolle", "eig_verh"]);
+
+/* Vorgesehene Verfahren je Objektart (erste Angabe wird vorausgewählt) */
+const VERFAHREN = d =>
+  is(d, "HAUS") || is(d, "FREIZEIT") ? ["Sachwertverfahren", "Vergleichswertverfahren"] :
+  is(d, "ZFH") ? ["Sachwertverfahren", "Vergleichswertverfahren", "Ertragswertverfahren"] :
+  is(d, "ETW") ? ["Vergleichswertverfahren", "Ertragswertverfahren"] :
+  is(d, "ERTRAG") ? ["Ertragswertverfahren", "Vergleichswertverfahren", "Sachwertverfahren"] :
+  is(d, "UNBEBAUT") ? ["Vergleichswertverfahren (Bodenwert)"] :
+  ["Vergleichswertverfahren", "Ertragswertverfahren", "Sachwertverfahren"];
+
+const WHEN_SECTION = {
+  s6: bebaut, s7: d => only(d, "ETW"), s8: bebaut, s9: bebaut, s11: bebaut,
+  s12: d => bebaut(d) || has(d, "ob_art", "Land- / Forstwirtschaft")
+};
+const WHEN_FIELD = {
+  eig_name: d => !has(d, "ag_rolle", "Eigentümer/in"),
+  eig_anteile: d => !d.eig_verh || ["Miteigentum nach Bruchteilen", "Eheleute / Lebenspartner", "Erbengemeinschaft", "Gesellschaft (GbR, GmbH …)"].includes(d.eig_verh),
+  r_berechtigt: d => ja(d, "r_wohnrecht") || ja(d, "r_niess"),
+  r_gebjahr: d => ja(d, "r_wohnrecht") || ja(d, "r_niess"),
+  r_entgelt: d => ja(d, "r_wohnrecht") || ja(d, "r_niess"),
+  r_erbbauzins: d => ja(d, "r_erbbau"), r_erbbauende: d => ja(d, "r_erbbau"),
+  r_gebeigentum: d => not(d, "ETW"), r_schuldr: d => not(d, "ETW", "ERTRAG"),
+  gr_zuschnitt: d => not(d, "ETW"), gr_topo: d => not(d, "ETW"), gr_teilflaechen: d => not(d, "ETW"),
+  l_bebauung: d => not(d, "ETW"), l_wasser: d => not(d, "ETW"),
+  fertighaus: d => has(d, "bauweise", "Fertighaus"),
+  dachform: d => not(d, "ETW"), dacheindeckung: d => not(d, "ETW"),
+  we: d => not(d, "HAUS"), ge: d => not(d, "HAUS", "ZFH", "ETW"),
+  einlieger: d => is(d, "HAUS"),
+  gfl: d => not(d, "HAUS", "ZFH", "ETW"),
+  keller: d => not(d, "ETW"), kellernutzung: d => not(d, "ETW"), dg: d => not(d, "ETW"),
+  bg_vorhanden: d => not(d, "ETW"),
+  kernsaniert_jahr: d => has(d, "zustand", "kernsaniert"),
+  energie: bebaut, heizsystem: bebaut, waermevert: bebaut, wz_bj: bebaut, wz_typ: bebaut, ww: bebaut, pv: bebaut,
+  pv_kwp: d => bebaut(d) && (d.pv || []).length > 0, pv_bj: d => bebaut(d) && (d.pv || []).length > 0,
+  pv_speicher: d => bebaut(d) && has(d, "pv", "Batteriespeicher"), pv_eigentum: d => bebaut(d) && has(d, "pv", "Photovoltaik"),
+  ea_art: bebaut, ea_klasse: bebaut, ea_kwh: bebaut, ea_ausgestellt: bebaut, ea_gueltig: bebaut,
+  er_tank: d => bebaut(d) && not(d, "ETW"),
+  leer_seit: d => has(d, "nutzung", "leerstehend"),
+  mieten: mietrelevant, v_erhoehung: mietrelevant, v_rueckstand: mietrelevant, v_kuendigung: mietrelevant,
+  bk_verw: mietrelevant, bk_inst: mietrelevant, bk_sonst: mietrelevant,
+  sch_asbest: bebaut, sch_kmf: bebaut, sch_holz: bebaut, sch_pak: bebaut, sch_blei: bebaut, sch_sonst: bebaut
+};
+const WHEN_HEAD = {
+  "Photovoltaik, Speicher, Wallbox": bebaut, "Energieausweis": bebaut,
+  "Miet- und Nutzungseinheiten": mietrelevant, "Nicht umlagefähige Kosten": mietrelevant
+};
+const OPTIONS = {
+  verfahren: VERFAHREN,
+  ot_besichtigt: d => bebaut(d) ? ["alle Wohn- und Nutzräume", "Keller", "Dachboden / Spitzboden", "Heizung / Technik", "Nebengebäude / Garage", "Außenanlagen"] : ["Grundstück", "Aufwuchs / Außenanlagen", "Zufahrt / Umgebung"]
+};
+/* Unterlagen: gleiche Reihenfolge wie in Abschnitt 17 (null = immer) */
+const DOC_WHEN = [null, null, null, bebaut, bebaut, bebaut, bebaut, null, bebaut, bebaut, null, bebaut, null,
+  mietrelevant, d => ja(d, "r_erbbau"), d => only(d, "ETW"), d => only(d, "ETW"), d => only(d, "ERTRAG")];
+
+SECTIONS.forEach(sec => {
+  if (WHEN_SECTION[sec.id]) sec.when = WHEN_SECTION[sec.id];
+  sec.f.forEach(f => {
+    if (f.id && WHEN_FIELD[f.id]) f.when = WHEN_FIELD[f.id];
+    if (f.t === "h" && WHEN_HEAD[f.l]) f.when = WHEN_HEAD[f.l];
+    if (f.id && OPTIONS[f.id]) f.opts = OPTIONS[f.id];
+    if (f.t === "docs") f.rowWhen = DOC_WHEN;
+  });
+});
