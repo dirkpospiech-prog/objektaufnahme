@@ -48,7 +48,8 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
 .btn:disabled { opacity: .5; cursor: default; }
 
 /* Kopfleiste wie Website-Fußzeile: dunkles Anthrazit mit hellem Logo */
-.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bar); color: var(--bar-fg); }
+/* Kopfzeile reicht bis unter die Statusleiste (Android) und schiebt ihren Inhalt um deren Höhe nach unten */
+.top { position: sticky; top: 0; padding-top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bar); color: var(--bar-fg); }
 .top .wrap { display: flex; align-items: center; gap: 8px; min-height: 58px; }
 .top .logo { height: 26px; width: auto; filter: invert(1); display: block; }
 .top h1 { font-family: var(--sans); font-weight: 600; font-size: 18px; color: var(--bar-fg); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -104,7 +105,7 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
 .secnav button { flex: none; border: 1px solid rgba(255,255,255,.22); background: transparent; color: var(--bar-fg); padding: 6px 12px; font-size: 14px; font-weight: 500; display: flex; gap: 6px; align-items: center; white-space: nowrap; }
 .secnav button .n { font-weight: 700; opacity: .7; }
 .secnav button .p { font-size: 11px; opacity: .7; font-variant-numeric: tabular-nums; }
-.secnav button[aria-current="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+.secnav button[aria-current="true"] { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); }
 .sec { padding-block: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
 .sec-head { display: flex; align-items: baseline; gap: 12px; }
 .sec-head .num { font-weight: 700; font-size: 14px; background: var(--brand); color: var(--brand-fg); padding: 2px 9px; }
@@ -230,8 +231,8 @@ fieldset.fs[disabled] .btn, fieldset.fs[disabled] .pill, fieldset.fs[disabled] .
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 .tabs.seg { gap: 6px; border: 0; flex-wrap: wrap; }
-.tabs.seg button { flex: 1 1 auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px 12px; color: var(--ink, #2A2F35); }
-.tabs.seg button[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+.tabs.seg button { flex: 1 1 auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 10px 12px; color: var(--ink-strong); font-weight: 600; }
+.tabs.seg button[aria-selected="true"] { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); }
 
 .std.rate .lv { grid-template-columns: 28px 160px minmax(0, 1fr); }
 .std .lv .d { color: var(--muted); }
